@@ -1,0 +1,25 @@
+{
+  "name": "bot-whatsapp-colegio",
+  "version": "1.0.0",
+  "description": "Bot de WhatsApp para captación de leads de programa escolar",
+  "main": "src/app.js",
+  "scripts": {
+    "start": "node src/app.js",
+    "dev": "node --watch src/app.js"
+  },
+  "keywords": [
+    "whatsapp",
+    "bot",
+    "express",
+    "mysql"
+  ],
+  "author": "Educando para la Vida",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^1.7.9",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "mysql2": "^3.12.0"
+  }
+}
