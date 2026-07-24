@@ -1,10 +1,10 @@
 -- ===================================================
 -- Esquema de Base de Datos - Bot WhatsApp Colegio
--- Base de datos: colegio_bot
+-- Base de datos: ki11745159_educandoparalavida
 -- ===================================================
 
-CREATE DATABASE IF NOT EXISTS colegio_bot CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-USE colegio_bot;
+CREATE DATABASE IF NOT EXISTS ki11745159_educandoparalavida CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE ki11745159_educandoparalavida;
 
 -- 1. Tabla de leads capturados (datos finales)
 CREATE TABLE IF NOT EXISTS leads (
