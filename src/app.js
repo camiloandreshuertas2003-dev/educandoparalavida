@@ -24,10 +24,15 @@ app.get('/', (req, res) => {
 // Rutas del Webhook de WhatsApp
 app.use('/webhook', webhookRoutes);
 
-// Iniciar Servidor
-app.listen(PORT, () => {
-  console.log(`===================================================`);
-  console.log(` Servidor Bot corriendo en el puerto ${PORT}`);
-  console.log(` Webhook URL: http://localhost:${PORT}/webhook`);
-  console.log(`===================================================`);
-});
+// Para ejecución local
+if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log(`===================================================`);
+    console.log(` Servidor Bot corriendo en el puerto ${PORT}`);
+    console.log(` Webhook URL: http://localhost:${PORT}/webhook`);
+    console.log(`===================================================`);
+  });
+}
+
+// Exportar para Vercel Serverless
+module.exports = app;
