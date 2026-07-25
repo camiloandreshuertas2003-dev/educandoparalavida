@@ -5,7 +5,47 @@ const { enviarMensajeTexto, enviarMensajeLista } = require('./whatsappService');
 const estadosEnMemoria = new Map();
 
 /**
- * Obtener mensaje personalizado del bot desde la base de datos (o usar texto por defecto profesional sin emojis)
+ * Buscar respuestas en la Base de Conocimiento (FAQs) usando coincidencia por palabras clave
+ */
+async function buscarEnBaseConocimiento(mensajeTexto) {
+  if (!mensajeTexto) return null;
+  const texto = mensajeTexto.toLowerCase();
+
+  try {
+    const [faqs] = await pool.query('SELECT pregunta_frecuente, respuesta_aprobada FROM base_conocimiento WHERE activo = TRUE');
+    if (faqs && faqs.length > 0) {
+      for (const faq of faqs) {
+        const keywords = faq.pregunta_frecuente.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+        const matchCount = keywords.filter(k => texto.includes(k)).length;
+        if (matchCount >= 1 || (texto.includes('precio') && faq.pregunta_frecuente.toLowerCase().includes('precio')) ||
+            (texto.includes('costo') && faq.pregunta_frecuente.toLowerCase().includes('precio')) ||
+            (texto.includes('en vivo') && faq.pregunta_frecuente.toLowerCase().includes('vivo')) ||
+            (texto.includes('titulo') && faq.pregunta_frecuente.toLowerCase().includes('titulo')) ||
+            (texto.includes('oficial') && faq.pregunta_frecuente.toLowerCase().includes('oficial'))) {
+          return faq.respuesta_aprobada;
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('⚠️ Nota consultando Base de Conocimiento:', err.message);
+  }
+
+  // Respuestas predeterminadas institucionales
+  if (texto.includes('precio') || texto.includes('costo') || texto.includes('cuanto') || texto.includes('valor')) {
+    return 'En el Colegio Virtual Educando para la Vida los costos son muy accesibles. Ofrecemos mensualidades economicas con facilidades de pago. Al registrar sus datos, le enviaremos la tarifa exacta para su grado.';
+  }
+  if (texto.includes('clase') || texto.includes('vivo') || texto.includes('grabad')) {
+    return 'Ofrecemos un modelo flexible 100% virtual con plataforma 24/7, clases en vivo interactivas y tutorias personalizadas para aprender a su propio ritmo.';
+  }
+  if (texto.includes('titulo') || texto.includes('valido') || texto.includes('oficial') || texto.includes('icfes')) {
+    return 'Contamos con resolucion oficial expedida por la Secretaria de Educacion conforme a la Ley 115. El titulo de Bachiller es 100% legal y valido para ingresar a universidades.';
+  }
+
+  return null;
+}
+
+/**
+ * Obtener mensaje personalizado del bot desde la base de datos
  */
 async function obtenerTextoBot(clave, textoPorDefecto) {
   try {
@@ -13,9 +53,7 @@ async function obtenerTextoBot(clave, textoPorDefecto) {
     if (rows && rows.length > 0 && rows[0].contenido) {
       return rows[0].contenido.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}]/gu, '');
     }
-  } catch (err) {
-    // Si falla la BD, retorna el texto por defecto
-  }
+  } catch (err) {}
   return textoPorDefecto;
 }
 
@@ -28,9 +66,7 @@ async function obtenerGradosDinamicos() {
     if (rows && rows.length > 0) {
       return rows;
     }
-  } catch (err) {
-    console.warn('⚠️ No se pudieron cargar los grados desde MySQL, usando lista fallback.');
-  }
+  } catch (err) {}
 
   return [
     { id: 1, nombre: 'Preescolar / Transicion' },
@@ -42,7 +78,7 @@ async function obtenerGradosDinamicos() {
 }
 
 /**
- * Obtener estado de la conversación con persistencia en MySQL y respaldo en memoria
+ * Obtener estado de la conversación
  */
 async function obtenerEstadoConversacion(telefono) {
   try {
@@ -52,9 +88,7 @@ async function obtenerEstadoConversacion(telefono) {
       estadosEnMemoria.set(telefono, estadoBD);
       return estadoBD;
     }
-  } catch (error) {
-    console.warn(`⚠️ Error consultando estado en BD para ${telefono}:`, error.message);
-  }
+  } catch (error) {}
 
   if (estadosEnMemoria.has(telefono)) {
     return estadosEnMemoria.get(telefono);
@@ -98,22 +132,22 @@ async function actualizarConversacion(telefono, nuevosCampos) {
     `;
 
     await pool.query(sql, [...insertValues, ...updateValues]);
-    console.log(` Estado de conversación actualizado en BD para ${telefono}: paso_actual -> "${actualizado.paso_actual}"`);
-  } catch (error) {
-    console.error(` Error actualizando conversación en BD para ${telefono}:`, error.message);
-  }
+  } catch (error) {}
 }
 
 /**
- * Guardar el Lead final en la tabla 'leads_fase2'
+ * Guardar el Lead final con puntuación automática (Lead Scoring)
  */
 async function guardarLead(telefono, nombre, apellido, gradoId, gradoTexto) {
   try {
+    let puntaje = 30; // Base por completar datos
+    if (nombre && apellido) puntaje += 20;
+
     await pool.query(
-      `INSERT INTO leads_fase2 (telefono, nombre_contacto, apellido_contacto, grado_interes_id, habeas_data_aceptado)
-       VALUES (?, ?, ?, ?, TRUE)
-       ON DUPLICATE KEY UPDATE nombre_contacto=?, apellido_contacto=?, grado_interes_id=?, actualizado_en=NOW()`,
-      [telefono, nombre, apellido, gradoId || null, nombre, apellido, gradoId || null]
+      `INSERT INTO leads_fase2 (telefono, nombre_contacto, apellido_contacto, grado_interes_id, habeas_data_aceptado, puntaje)
+       VALUES (?, ?, ?, ?, TRUE, ?)
+       ON DUPLICATE KEY UPDATE nombre_contacto=?, apellido_contacto=?, grado_interes_id=?, puntaje=?, actualizado_en=NOW()`,
+      [telefono, nombre, apellido, gradoId || null, puntaje, nombre, apellido, gradoId || null, puntaje]
     );
 
     await pool.query(
@@ -123,14 +157,14 @@ async function guardarLead(telefono, nombre, apellido, gradoId, gradoTexto) {
       [telefono, nombre, apellido, gradoTexto, nombre, apellido, gradoTexto]
     );
 
-    console.log(` Lead registrado exitosamente para ${nombre} ${apellido} (${telefono})`);
+    console.log(` Lead registrado con scoring ${puntaje} para ${nombre} ${apellido} (${telefono})`);
   } catch (error) {
     console.error(' Error al guardar lead en MySQL:', error.message);
   }
 }
 
 /**
- * Guardar log del mensaje entrante/saliente
+ * Guardar log del mensaje
  */
 async function registrarLog(telefono, direccion, contenido) {
   try {
@@ -138,17 +172,15 @@ async function registrarLog(telefono, direccion, contenido) {
       'INSERT INTO mensajes_log (telefono, direccion, contenido) VALUES (?, ?, ?)',
       [telefono, direccion, contenido]
     );
-  } catch (error) {
-    // Ignorar si falla el log
-  }
+  } catch (error) {}
 }
 
 /**
- * Procesar mensaje entrante del usuario (Flujo Completo de Captación)
+ * Procesar mensaje entrante con Capa NLU + Flujo Estructurado
  */
 async function procesarMensaje(telefono, mensajeTexto) {
   const textoLimpio = mensajeTexto ? mensajeTexto.trim() : '';
-  console.log(` PROCESANDO FLUIDO DE CONVERSACIÓN para ${telefono}. Mensaje: "${textoLimpio}"`);
+  console.log(` PROCESANDO CONVERSACIÓN NLU para ${telefono}: "${textoLimpio}"`);
   registrarLog(telefono, 'entrante', textoLimpio).catch(() => {});
 
   // Comando global para reiniciar conversación
@@ -168,8 +200,21 @@ async function procesarMensaje(telefono, mensajeTexto) {
     return;
   }
 
+  // Comprobar si el mensaje es una pregunta libre a la Base de Conocimiento
+  const respuestaFaq = await buscarEnBaseConocimiento(textoLimpio);
   const estado = await obtenerEstadoConversacion(telefono);
-  console.log(` PASO ACTUAL DE CONVERSACIÓN para ${telefono}: "${estado.paso_actual}"`);
+
+  if (respuestaFaq && estado.paso_actual !== 'inicio' && estado.paso_actual !== 'finalizado') {
+    let msgPregunta = `${respuestaFaq}\n\n`;
+    if (estado.paso_actual === 'nombre') msgPregunta += 'Para continuar con su registro, por favor indique su nombre completo:';
+    else if (estado.paso_actual === 'apellido') msgPregunta += 'Para continuar, por favor indique su apellido:';
+    else if (estado.paso_actual === 'telefono') msgPregunta += 'Indique su numero telefonico de contacto:';
+    else if (estado.paso_actual === 'programa') msgPregunta += 'Indique el grado educativo de su interes:';
+
+    await enviarMensajeTexto(telefono, msgPregunta);
+    registrarLog(telefono, 'saliente', msgPregunta).catch(() => {});
+    return;
+  }
 
   switch (estado.paso_actual) {
     case 'inicio': {
@@ -301,9 +346,14 @@ async function procesarMensaje(telefono, mensajeTexto) {
     }
 
     case 'finalizado': {
-      const msg = `Bienvenido nuevamente. Su solicitud previa ya fue registrada. Si desea reiniciar el formulario para ingresar otra informacion, escriba REINICIAR.`;
-      await enviarMensajeTexto(telefono, msg);
-      registrarLog(telefono, 'saliente', msg).catch(() => {});
+      if (respuestaFaq) {
+        await enviarMensajeTexto(telefono, respuestaFaq);
+        registrarLog(telefono, 'saliente', respuestaFaq).catch(() => {});
+      } else {
+        const msg = `Bienvenido nuevamente. Su solicitud previa ya fue registrada. Si desea reiniciar el formulario para ingresar otra informacion, escriba REINICIAR.`;
+        await enviarMensajeTexto(telefono, msg);
+        registrarLog(telefono, 'saliente', msg).catch(() => {});
+      }
       break;
     }
 

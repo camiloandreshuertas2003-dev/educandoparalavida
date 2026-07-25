@@ -14,7 +14,6 @@ async function login(req, res) {
   try {
     const [rows] = await pool.query('SELECT * FROM usuarios_panel WHERE correo = ? AND activo = TRUE', [correo]);
     
-    // Si no existe la tabla o está vacía, creamos el admin por defecto
     if (!rows || rows.length === 0) {
       if (correo === 'admin@educandoparalavida.edu.co' && password === 'admin12345') {
         const hash = await bcrypt.hash('admin12345', 10);
@@ -33,7 +32,6 @@ async function login(req, res) {
     const usuario = rows[0];
     let passwordMatch = await bcrypt.compare(password, usuario.password_hash);
 
-    // Auto-reparar el hash si se importó con la semilla inicial
     if (!passwordMatch && correo === 'admin@educandoparalavida.edu.co' && password === 'admin12345') {
       const newHash = await bcrypt.hash('admin12345', 10);
       await pool.query('UPDATE usuarios_panel SET password_hash = ? WHERE id = ?', [newHash, usuario.id]);
@@ -65,7 +63,7 @@ async function login(req, res) {
   }
 }
 
-// 2. DASHBOARD: Estadísticas generales
+// 2. DASHBOARD & KANBAN: Estadísticas y Vista Kanban
 async function getStats(req, res) {
   try {
     let totalLeads = 0;
@@ -107,6 +105,39 @@ async function getStats(req, res) {
   }
 }
 
+async function getKanban(req, res) {
+  try {
+    const [leads] = await pool.query(`
+      SELECT l.*, g.nombre as grado_nombre
+      FROM leads_fase2 l
+      LEFT JOIN grados g ON l.grado_interes_id = g.id
+      ORDER BY l.puntaje DESC, l.fecha_registro DESC
+    `);
+
+    const kanban = {
+      nuevo: [],
+      contactado: [],
+      en_proceso: [],
+      matriculado: [],
+      descartado: []
+    };
+
+    (leads || []).forEach(lead => {
+      const estado = lead.estado_embudo || 'nuevo';
+      if (kanban[estado]) {
+        kanban[estado].push(lead);
+      } else {
+        kanban.nuevo.push(lead);
+      }
+    });
+
+    res.json(kanban);
+  } catch (error) {
+    console.error('Error obteniendo datos Kanban:', error);
+    res.json({ nuevo: [], contactado: [], en_proceso: [], matriculado: [], descartado: [] });
+  }
+}
+
 // 3. LEADS: Consultar y actualizar
 async function getLeads(req, res) {
   try {
@@ -131,7 +162,7 @@ async function getLeads(req, res) {
       params.push(term, term, term);
     }
 
-    query += ' ORDER BY l.fecha_registro DESC LIMIT 100';
+    query += ' ORDER BY l.puntaje DESC, l.fecha_registro DESC LIMIT 100';
 
     const [leads] = await pool.query(query, params);
     res.json(leads || []);
@@ -143,7 +174,7 @@ async function getLeads(req, res) {
 
 async function updateLead(req, res) {
   const { id } = req.params;
-  const { estado_embudo, notas_internas, nombre_estudiante, edad_estudiante } = req.body;
+  const { estado_embudo, notas_internas, nombre_estudiante, edad_estudiante, puntaje } = req.body;
 
   try {
     await pool.query(
@@ -151,9 +182,10 @@ async function updateLead(req, res) {
        SET estado_embudo = COALESCE(?, estado_embudo),
            notas_internas = COALESCE(?, notas_internas),
            nombre_estudiante = COALESCE(?, nombre_estudiante),
-           edad_estudiante = COALESCE(?, edad_estudiante)
+           edad_estudiante = COALESCE(?, edad_estudiante),
+           puntaje = COALESCE(?, puntaje)
        WHERE id = ?`,
-      [estado_embudo, notas_internas, nombre_estudiante, edad_estudiante, id]
+      [estado_embudo, notas_internas, nombre_estudiante, edad_estudiante, puntaje, id]
     );
     res.json({ message: 'Lead actualizado correctamente' });
   } catch (error) {
@@ -162,7 +194,7 @@ async function updateLead(req, res) {
   }
 }
 
-// 4. GRADOS Y NIVELES: Listar y guardar
+// 4. GRADOS Y NIVELES
 async function getGrados(req, res) {
   try {
     const [grados] = await pool.query(`
@@ -193,7 +225,7 @@ async function saveGrado(req, res) {
   }
 }
 
-// 5. PAQUETES EDUCATIVOS: Listar y guardar
+// 5. PAQUETES EDUCATIVOS
 async function getPaquetes(req, res) {
   try {
     const [paquetes] = await pool.query(`
@@ -210,17 +242,17 @@ async function getPaquetes(req, res) {
 }
 
 async function savePaquete(req, res) {
-  const { id, nombre, grado_id, descripcion, incluye, precio, periodicidad_pago, activo } = req.body;
+  const { id, nombre, grado_id, descripcion, incluye, precio, periodicidad_pago, activo, estado } = req.body;
   try {
     if (id) {
       await pool.query(
-        'UPDATE paquetes SET nombre=?, grado_id=?, descripcion=?, incluye=?, precio=?, periodicidad_pago=?, activo=? WHERE id=?',
-        [nombre, grado_id || null, descripcion, incluye, precio, periodicidad_pago, activo, id]
+        'UPDATE paquetes SET nombre=?, grado_id=?, descripcion=?, incluye=?, precio=?, periodicidad_pago=?, activo=?, estado=? WHERE id=?',
+        [nombre, grado_id || null, descripcion, incluye, precio, periodicidad_pago, activo, estado || 'publicado', id]
       );
     } else {
       await pool.query(
-        'INSERT INTO paquetes (nombre, grado_id, descripcion, incluye, precio, periodicidad_pago, activo) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [nombre, grado_id || null, descripcion, incluye, precio, periodicidad_pago || 'mensual', activo ?? true]
+        'INSERT INTO paquetes (nombre, grado_id, descripcion, incluye, precio, periodicidad_pago, activo, estado) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [nombre, grado_id || null, descripcion, incluye, precio, periodicidad_pago || 'mensual', activo ?? true, estado || 'publicado']
       );
     }
     res.json({ message: 'Paquete guardado con éxito' });
@@ -230,7 +262,7 @@ async function savePaquete(req, res) {
   }
 }
 
-// 6. MENSAJES DEL BOT: Listar y editar
+// 6. MENSAJES DEL BOT Y BASE DE CONOCIMIENTO (FAQS)
 async function getBotMensajes(req, res) {
   try {
     const [mensajes] = await pool.query('SELECT * FROM bot_mensajes ORDER BY id ASC');
@@ -250,6 +282,31 @@ async function updateBotMensaje(req, res) {
   } catch (error) {
     console.error('Error actualizando mensaje del bot:', error);
     res.status(500).json({ error: 'Error al actualizar mensaje del bot' });
+  }
+}
+
+async function getBaseConocimiento(req, res) {
+  try {
+    const [faqs] = await pool.query('SELECT * FROM base_conocimiento ORDER BY id DESC');
+    res.json(faqs || []);
+  } catch (error) {
+    console.error('Error obteniendo base de conocimiento:', error);
+    res.json([]);
+  }
+}
+
+async function saveBaseConocimiento(req, res) {
+  const { id, categoria, pregunta_frecuente, respuesta_aprobada, activo } = req.body;
+  try {
+    if (id) {
+      await pool.query('UPDATE base_conocimiento SET categoria=?, pregunta_frecuente=?, respuesta_aprobada=?, activo=? WHERE id=?', [categoria, pregunta_frecuente, respuesta_aprobada, activo, id]);
+    } else {
+      await pool.query('INSERT INTO base_conocimiento (categoria, pregunta_frecuente, respuesta_aprobada, activo) VALUES (?, ?, ?, ?)', [categoria || 'general', pregunta_frecuente, respuesta_aprobada, activo ?? true]);
+    }
+    res.json({ message: 'Pregunta frecuente guardada con éxito' });
+  } catch (error) {
+    console.error('Error guardando en base de conocimiento:', error);
+    res.status(500).json({ error: 'Error al guardar en la base de conocimiento' });
   }
 }
 
@@ -288,6 +345,7 @@ async function getMensajesLog(req, res) {
 module.exports = {
   login,
   getStats,
+  getKanban,
   getLeads,
   updateLead,
   getGrados,
@@ -296,6 +354,8 @@ module.exports = {
   savePaquete,
   getBotMensajes,
   updateBotMensaje,
+  getBaseConocimiento,
+  saveBaseConocimiento,
   getConversaciones,
   getMensajesLog,
 };
