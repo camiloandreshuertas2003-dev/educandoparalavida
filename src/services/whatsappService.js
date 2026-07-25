@@ -3,7 +3,7 @@ require('dotenv').config();
 
 const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
-const META_URL = `https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/messages`;
+const META_URL = `https://graph.facebook.com/v21.0/${PHONE_NUMBER_ID}/messages`;
 
 /**
  * Envia un mensaje de texto simple a un número de WhatsApp
@@ -23,7 +23,7 @@ async function enviarMensajeTexto(to, texto) {
 
     const response = await axios.post(META_URL, data, {
       headers: {
-        Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+        Authorization: `Bearer ${process.env.WHATSAPP_TOKEN || WHATSAPP_TOKEN}`,
         'Content-Type': 'application/json',
       },
     });
@@ -67,7 +67,7 @@ async function enviarMensajeLista(to, titulo, mensajeHeader, secciones) {
 
     const response = await axios.post(META_URL, data, {
       headers: {
-        Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+        Authorization: `Bearer ${process.env.WHATSAPP_TOKEN || WHATSAPP_TOKEN}`,
         'Content-Type': 'application/json',
       },
     });
