@@ -68,48 +68,49 @@ async function recibirMensaje(req, res) {
     }
 
     const body = req.body;
+    console.log(' Webhook Payload Recibido:', JSON.stringify(body));
 
-    if (body.object === 'whatsapp_business_account') {
-      const entries = body.entry || [];
-      for (const entry of entries) {
-        const changes = entry.changes || [];
-        for (const change of changes) {
-          const value = change.value;
-          if (value && value.messages && value.messages.length > 0) {
-            for (const msg of value.messages) {
-              const from = msg.from; // Número del remitente
+    const entries = body.entry || [];
+    let mensajeProcesado = false;
 
-              let textoMensaje = '';
+    for (const entry of entries) {
+      const changes = entry.changes || [];
+      for (const change of changes) {
+        const value = change.value;
+        if (value && value.messages && value.messages.length > 0) {
+          for (const msg of value.messages) {
+            const from = msg.from; // Número del remitente
 
-              if (msg.type === 'text') {
-                textoMensaje = msg.text ? msg.text.body : '';
-              } else if (msg.type === 'interactive') {
-                if (msg.interactive.type === 'list_reply') {
-                  textoMensaje = msg.interactive.list_reply.title || msg.interactive.list_reply.id;
-                } else if (msg.interactive.type === 'button_reply') {
-                  textoMensaje = msg.interactive.button_reply.title || msg.interactive.button_reply.id;
-                }
+            let textoMensaje = '';
+
+            if (msg.type === 'text') {
+              textoMensaje = msg.text ? msg.text.body : '';
+            } else if (msg.type === 'interactive') {
+              if (msg.interactive.type === 'list_reply') {
+                textoMensaje = msg.interactive.list_reply.title || msg.interactive.list_reply.id;
+              } else if (msg.interactive.type === 'button_reply') {
+                textoMensaje = msg.interactive.button_reply.title || msg.interactive.button_reply.id;
               }
+            }
 
-              console.log(` Mensaje procesado de ${from}: "${textoMensaje}"`);
+            console.log(` PROCESANDO MENSAJE ENTRANTE de ${from}: "${textoMensaje}"`);
+            mensajeProcesado = true;
 
-              // Ejecutar procesamiento del flujo
-              try {
-                await procesarMensaje(from, textoMensaje);
-              } catch (errProc) {
-                console.error(` Error en procesarMensaje para ${from}:`, errProc);
-              }
+            // Ejecutar procesamiento asíncrono garantizado
+            try {
+              await procesarMensaje(from, textoMensaje);
+            } catch (errProc) {
+              console.error(` Error crítico en procesarMensaje para ${from}:`, errProc);
             }
           }
         }
       }
-
-      return res.status(200).send('EVENT_RECEIVED');
     }
 
-    res.sendStatus(404);
+    // Responder siempre 200 OK a Meta
+    return res.status(200).send('EVENT_RECEIVED');
   } catch (error) {
-    console.error(' Error en POST /webhook:', error);
+    console.error(' Error general en POST /webhook:', error);
     return res.status(200).send('EVENT_RECEIVED');
   }
 }
