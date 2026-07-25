@@ -3,11 +3,12 @@ const cors = require('cors');
 require('dotenv').config();
 
 const webhookRoutes = require('./routes/webhookRoutes');
+const adminRoutes = require('./routes/adminRoutes');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middlewares - Capturamos el buffer rawBody para verificar firmas de webhook si es necesario
+// Middlewares
 app.use(cors());
 app.use(express.json({
   verify: (req, res, buf) => {
@@ -23,10 +24,19 @@ app.get('/favicon.ico', (req, res) => res.status(204).end());
 app.get('/health', (req, res) => {
   res.json({
     status: 'online',
-    app: 'Bot WhatsApp Colegio - Educando para la Vida',
+    app: 'Bot WhatsApp Colegio - Educando para la Vida (Fase 2)',
     timestamp: new Date().toISOString(),
   });
 });
+
+// Rutas de la API de Administración del Panel de Control
+app.use('/api/admin', adminRoutes);
+
+// Rutas del Webhook de WhatsApp
+app.use('/webhook', webhookRoutes);
+
+// Servir la aplicación Web estática del Panel si existe en public/
+app.use(express.static('public'));
 
 // Página visual de estado (Dashboard HTML) al visitar la raíz en el navegador
 app.get('/', (req, res) => {
@@ -36,7 +46,7 @@ app.get('/', (req, res) => {
     <head>
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>Bot WhatsApp Colegio - Educando para la Vida</title>
+      <title>Bot WhatsApp Colegio Virtual - Educando para la Vida 🇨🇴</title>
       <link rel="preconnect" href="https://fonts.googleapis.com">
       <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
       <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
@@ -58,7 +68,7 @@ app.get('/', (req, res) => {
           border: 1px solid rgba(255, 255, 255, 0.1);
           border-radius: 24px;
           padding: 40px;
-          max-width: 600px;
+          max-width: 650px;
           width: 100%;
           box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
           text-align: center;
@@ -105,27 +115,27 @@ app.get('/', (req, res) => {
     <body>
       <div class="container">
         <div class="badge">
-          <span class="dot"></span> Servidor Backend Activo & Conectado
+          <span class="dot"></span> Servidor Backend & Panel API Activos
         </div>
-        <h1>Bot WhatsApp Colegio</h1>
-        <p>Educando para la Vida — Captación Automática de Leads</p>
+        <h1>Colegio Virtual Educando para la Vida 🇨🇴</h1>
+        <p>Bot de WhatsApp + Panel de Control Administrativo (Fase 2)</p>
         
         <div class="grid">
           <div class="card">
             <div class="card-label">Estado del Webhook</div>
-            <div class="card-value" style="color: #10b981;">🟢 Configurado (/webhook)</div>
+            <div class="card-value" style="color: #10b981;">🟢 Activo (/webhook)</div>
           </div>
           <div class="card">
-            <div class="card-label">Plataforma</div>
-            <div class="card-value">Vercel Serverless</div>
+            <div class="card-label">API de Administración</div>
+            <div class="card-value" style="color: #38bdf8;">🟢 Activa (/api/admin)</div>
           </div>
           <div class="card">
             <div class="card-label">Base de Datos</div>
             <div class="card-value">MySQL (Contabo VPS)</div>
           </div>
           <div class="card">
-            <div class="card-label">API WhatsApp</div>
-            <div class="card-value">Meta Cloud API v20.0</div>
+            <div class="card-label">Plataforma</div>
+            <div class="card-value">Vercel Serverless</div>
           </div>
         </div>
 
@@ -138,15 +148,13 @@ app.get('/', (req, res) => {
   `);
 });
 
-// Rutas del Webhook de WhatsApp
-app.use('/webhook', webhookRoutes);
-
 // Para ejecución local
 if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
   app.listen(PORT, () => {
     console.log(`===================================================`);
-    console.log(` Servidor Bot corriendo en el puerto ${PORT}`);
+    console.log(` Servidor Bot & API Admin corriendo en el puerto ${PORT}`);
     console.log(` Webhook URL: http://localhost:${PORT}/webhook`);
+    console.log(` Admin API: http://localhost:${PORT}/api/admin`);
     console.log(`===================================================`);
   });
 }
