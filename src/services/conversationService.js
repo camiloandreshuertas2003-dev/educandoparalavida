@@ -50,18 +50,18 @@ async function buscarEnBaseConocimiento(mensajeTexto) {
     console.warn('⚠️ Nota consultando Base de Conocimiento:', err.message);
   }
 
-  // Respuestas predeterminadas institucionales adaptadas a errores fonéticos
+  // Respuestas predeterminadas institucionales con emojis amables
   if (textoNorm.includes('precio')) {
-    return 'En el Colegio Virtual Educando para la Vida los costos son muy accesibles. Ofrecemos mensualidades economicas con facilidades de pago. Al registrar sus datos, le enviaremos la tarifa exacta para su grado.';
+    return '💡 En el Colegio Virtual Educando para la Vida 🎓 los costos son muy accesibles. Ofrecemos mensualidades económicas con facilidades de pago 💸. Al registrar sus datos, le enviaremos la tarifa exacta para su grado 📚.';
   }
   if (textoNorm.includes('vivo')) {
-    return 'Ofrecemos un modelo flexible 100% virtual con plataforma 24/7, clases en vivo interactivas y tutorias personalizadas para aprender a su propio ritmo.';
+    return '💻 Ofrecemos un modelo flexible 100% virtual con plataforma 24/7, clases en vivo interactivas 🎥 y tutorías personalizadas para aprender a su propio ritmo ✨.';
   }
   if (textoNorm.includes('titulo')) {
-    return 'Contamos con resolucion oficial expedida por la Secretaria de Educacion conforme a la Ley 115. El titulo de Bachiller es 100% legal y valido para ingresar a universidades.';
+    return '📜 Contamos con resolución oficial expedida por la Secretaría de Educación conforme a la Ley 115. El título de Bachiller es 100% legal y válido para ingresar a cualquier universidad 🏛️✨.';
   }
   if (textoNorm.includes('requisito')) {
-    return 'Se requiere fotocopia del documento de identidad del estudiante y acudiente, certificado del ultimo ano cursado y recibo de pago de matricula.';
+    return '📋 Se requiere fotocopia del documento de identidad del estudiante y acudiente 📄, certificado del último año cursado y recibo de pago de matrícula ✍️.';
   }
 
   return null;
@@ -73,24 +73,24 @@ async function buscarEnBaseConocimiento(mensajeTexto) {
 async function enviarMenuOpcionesFaq(telefono) {
   const secciones = [
     {
-      title: 'Consultas Frecuentes',
+      title: 'Consultas Frecuentes 💡',
       rows: [
-        { id: 'faq_precios', title: 'Precios y Pensiones' },
-        { id: 'faq_clases', title: 'Clases y Metodologia' },
-        { id: 'faq_titulo', title: 'Titulo Oficial MEN' },
-        { id: 'faq_requisitos', title: 'Requisitos de Matricula' },
-        { id: 'faq_horarios', title: 'Horarios de Atencion' },
+        { id: 'faq_precios', title: 'Precios y Pensiones 💸' },
+        { id: 'faq_clases', title: 'Clases y Metodología 💻' },
+        { id: 'faq_titulo', title: 'Título Oficial MEN 📜' },
+        { id: 'faq_requisitos', title: 'Requisitos de Matrícula 📋' },
+        { id: 'faq_horarios', title: 'Horarios de Atención ⏰' },
       ],
     },
   ];
 
-  const header = 'Menu de Ayuda - Colegio Virtual';
-  const body = 'Seleccione la opcion de su interes o indique su nombre completo para continuar el registro:';
+  const header = ' Menú de Ayuda 🎓';
+  const body = 'Seleccione la opción de su interés o indique su nombre completo para continuar su registro:';
 
   try {
     await enviarMensajeLista(telefono, body, header, secciones);
   } catch (e) {
-    const textFallback = `${body}\n\n1. Precios y Pensiones\n2. Clases y Metodologia\n3. Titulo Oficial MEN\n4. Requisitos de Matricula\n5. Horarios de Atencion`;
+    const textFallback = `${body}\n\n1. Precios y Pensiones 💸\n2. Clases y Metodología 💻\n3. Título Oficial MEN 📜\n4. Requisitos de Matrícula 📋\n5. Horarios de Atención ⏰`;
     await enviarMensajeTexto(telefono, textFallback);
   }
 }
@@ -102,7 +102,7 @@ async function obtenerTextoBot(clave, textoPorDefecto) {
   try {
     const [rows] = await pool.query('SELECT contenido FROM bot_mensajes WHERE clave = ? AND activo = TRUE', [clave]);
     if (rows && rows.length > 0 && rows[0].contenido) {
-      return rows[0].contenido.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}]/gu, '');
+      return rows[0].contenido;
     }
   } catch (err) {}
   return textoPorDefecto;
@@ -120,11 +120,11 @@ async function obtenerGradosDinamicos() {
   } catch (err) {}
 
   return [
-    { id: 1, nombre: 'Preescolar / Transicion' },
-    { id: 2, nombre: 'Primaria (1 a 5)' },
-    { id: 3, nombre: 'Secundaria (6 a 9)' },
-    { id: 4, nombre: 'Media Academica (10 y 11)' },
-    { id: 5, nombre: 'Bachillerato por Ciclos (CLEI Adultos)' },
+    { id: 1, nombre: 'Preescolar / Transición 🎨' },
+    { id: 2, nombre: 'Primaria (1° a 5°) ✏️' },
+    { id: 3, nombre: 'Secundaria (6° a 9°) 📘' },
+    { id: 4, nombre: 'Media Académica (10° y 11°) 🎓' },
+    { id: 5, nombre: 'Bachillerato por Ciclos (CLEI) 🌟' },
   ];
 }
 
@@ -231,22 +231,23 @@ async function registrarLog(telefono, direccion, contenido) {
 }
 
 /**
- * Enviar cuadro de confirmación con opciones numeradas para corregir o aceptar
+ * Enviar cuadro de confirmación ameno con emojis y números para elegir
  */
 async function enviarMensajeConfirmacionDatos(telefono, estado) {
   const nombreComp = estado.nombre_temp || 'No especificado';
   const telCont = estado.telefono_temp || telefono;
   const progComp = estado.programa_temp || 'No especificado';
 
-  const msgConfirmacion = ` Verifique sus datos de contacto:\n\n` +
-    `1. Nombre y Apellidos: ${nombreComp}\n` +
-    `2. Telefono de Contacto: ${telCont}\n` +
-    `3. Grado Educativo: ${progComp}\n\n` +
-    `Responda con un numero:\n` +
-    `4. Si los datos son CORRECTOS y desea confirmar.\n` +
-    `1. Si desea corregir su Nombre y Apellidos.\n` +
-    `2. Si desea corregir su Telefono.\n` +
-    `3. Si desea corregir su Grado.`;
+  const msgConfirmacion = `📋 *Verificación de Datos de Contacto* ✨\n\n` +
+    `Por favor confirme si la información registrada es correcta:\n\n` +
+    `👤 *1. Nombre y Apellidos:* ${nombreComp}\n` +
+    `📲 *2. Teléfono de Contacto:* ${telCont}\n` +
+    `🎓 *3. Grado Educativo:* ${progComp}\n\n` +
+    `Responda con un número:\n` +
+    `✅ *4.* Si los datos son *CORRECTOS* y desea confirmar.\n` +
+    `✏️ *1.* Si desea corregir su Nombre y Apellidos.\n` +
+    `📱 *2.* Si desea corregir su Teléfono.\n` +
+    `📚 *3.* Si desea corregir su Grado.`;
 
   await enviarMensajeTexto(telefono, msgConfirmacion);
   await registrarLog(telefono, 'saliente', msgConfirmacion);
@@ -271,7 +272,7 @@ async function procesarMensaje(telefono, mensajeTexto) {
       programa_temp: null,
     });
     
-    const bienvenida = 'Bienvenido al Colegio Virtual Educando para la Vida. Somos una institucion educativa autorizada. Para brindarle informacion sobre matriculas, por favor indique su Nombre Completo (Nombres y Apellidos):';
+    const bienvenida = '👋 ¡Hola! Bienvenido al Colegio Virtual Educando para la Vida 🎓✨. Somos una institución educativa 100% autorizada 📚. Para brindarle información personalizada sobre matrículas, por favor indique su *Nombre Completo* (Nombres y Apellidos) ✍️:';
     await enviarMensajeTexto(telefono, bienvenida);
     registrarLog(telefono, 'saliente', bienvenida).catch(() => {});
     await actualizarConversacion(telefono, { paso_actual: 'nombre' });
@@ -290,9 +291,9 @@ async function procesarMensaje(telefono, mensajeTexto) {
 
   if (respuestaFaq && estado.paso_actual !== 'inicio' && estado.paso_actual !== 'confirmacion' && estado.paso_actual !== 'finalizado') {
     let msgPregunta = `${respuestaFaq}\n\n`;
-    if (estado.paso_actual === 'nombre') msgPregunta += 'Para continuar con su registro, por favor indique su Nombre Completo (Nombres y Apellidos):';
-    else if (estado.paso_actual === 'telefono') msgPregunta += 'Indique su numero telefonico de contacto:';
-    else if (estado.paso_actual === 'programa') msgPregunta += 'Indique el grado educativo de su interes:';
+    if (estado.paso_actual === 'nombre') msgPregunta += '✍️ Para continuar con su registro, por favor indique su *Nombre Completo* (Nombres y Apellidos):';
+    else if (estado.paso_actual === 'telefono') msgPregunta += '📲 Indique su número telefónico de contacto:';
+    else if (estado.paso_actual === 'programa') msgPregunta += '🎓 Indique el grado educativo de su interés:';
 
     await enviarMensajeTexto(telefono, msgPregunta);
     registrarLog(telefono, 'saliente', msgPregunta).catch(() => {});
@@ -303,7 +304,7 @@ async function procesarMensaje(telefono, mensajeTexto) {
     case 'inicio': {
       const bienvenida = await obtenerTextoBot(
         'bienvenida',
-        'Bienvenido al Colegio Virtual Educando para la Vida. Somos una institucion educativa autorizada. Para brindarle informacion personalizada sobre matriculas, por favor indique su Nombre Completo (Nombres y Apellidos):'
+        '👋 ¡Hola! Bienvenido al Colegio Virtual Educando para la Vida 🎓✨. Somos una institución educativa 100% autorizada por el Ministerio de Educación 📚. Para brindarle información personalizada sobre matrículas y tarifas, por favor indique su *Nombre Completo* (Nombres y Apellidos) ✍️:'
       );
       await enviarMensajeTexto(telefono, bienvenida);
       registrarLog(telefono, 'saliente', bienvenida).catch(() => {});
@@ -313,7 +314,7 @@ async function procesarMensaje(telefono, mensajeTexto) {
 
     case 'nombre': {
       if (!textoLimpio) {
-        const msg = 'Por favor indique su Nombre Completo (Nombres y Apellidos) para continuar:';
+        const msg = '✍️ Por favor indique su *Nombre Completo* (Nombres y Apellidos) para continuar:';
         await enviarMensajeTexto(telefono, msg);
         registrarLog(telefono, 'saliente', msg).catch(() => {});
         return;
@@ -324,7 +325,7 @@ async function procesarMensaje(telefono, mensajeTexto) {
         paso_actual: 'telefono',
       });
 
-      const msg = `Gracias, ${textoLimpio}. Indique su numero telefonico de contacto (Escriba "este" si es el mismo numero de WhatsApp):`;
+      const msg = `🌟 ¡Muchas gracias, ${textoLimpio}! 📲 Indique su número telefónico de contacto (Escriba *"este"* si es este mismo número de WhatsApp):`;
       await enviarMensajeTexto(telefono, msg);
       registrarLog(telefono, 'saliente', msg).catch(() => {});
       break;
@@ -345,7 +346,7 @@ async function procesarMensaje(telefono, mensajeTexto) {
 
       const secciones = [
         {
-          title: 'Grados Disponibles',
+          title: 'Grados Disponibles 📚',
           rows: gradosDisponibles.map((g) => ({
             id: `g_${g.id}`,
             title: g.nombre,
@@ -353,8 +354,8 @@ async function procesarMensaje(telefono, mensajeTexto) {
         },
       ];
 
-      const mensajeHeader = 'Oferta Academica 2026';
-      const mensajeBody = 'Indique en cual grado o nivel educativo se encuentra interesado/a:';
+      const mensajeHeader = 'Oferta Académica 2026 🎓';
+      const mensajeBody = 'Indique en cuál grado o nivel educativo se encuentra interesado/a 👇:';
       
       try {
         await enviarMensajeLista(telefono, mensajeBody, mensajeHeader, secciones);
@@ -419,22 +420,22 @@ async function procesarMensaje(telefono, mensajeTexto) {
 
         await actualizarConversacion(telefono, { paso_actual: 'finalizado' });
 
-        const confirmacion = `Muchas gracias, ${nombreFinal}. Hemos registrado correctamente su solicitud para el programa: ${gradoFinal}. Un asesor academico de admisiones se comunicara con usted a la brevedad.\n\n(Puede escribir REINICIAR en cualquier momento si desea realizar otra consulta).`;
+        const confirmacion = `🎉 ¡Muchas gracias, ${nombreFinal}! ✨ Hemos registrado exitosamente su solicitud para el programa: *${gradoFinal}* 🎓. Un asesor académico de admisiones se comunicará con usted a la brevedad 📲.\n\n(Escriba *REINICIAR* en cualquier momento si desea realizar otra consulta) 🌟.`;
         await enviarMensajeTexto(telefono, confirmacion);
         registrarLog(telefono, 'saliente', confirmacion).catch(() => {});
       } else if (textoNorm === '1' || textoNorm === 'nombre') {
         await actualizarConversacion(telefono, { paso_actual: 'nombre' });
-        const msg = 'Por favor indique su Nombre Completo (Nombres y Apellidos) corregido:';
+        const msg = '✍️ Por favor indique su *Nombre Completo* (Nombres y Apellidos) corregido:';
         await enviarMensajeTexto(telefono, msg);
         registrarLog(telefono, 'saliente', msg).catch(() => {});
       } else if (textoNorm === '2' || textoNorm === 'telefono') {
         await actualizarConversacion(telefono, { paso_actual: 'telefono' });
-        const msg = 'Por favor indique su numero telefonico de contacto corregido:';
+        const msg = '📲 Por favor indique su número telefónico de contacto corregido:';
         await enviarMensajeTexto(telefono, msg);
         registrarLog(telefono, 'saliente', msg).catch(() => {});
       } else if (textoNorm === '3' || textoNorm === 'grado') {
         await actualizarConversacion(telefono, { paso_actual: 'telefono' });
-        const msg = 'Seleccionara nuevamente su grado educativo de interes:';
+        const msg = '🎓 Seleccionará nuevamente su grado educativo de interés:';
         await enviarMensajeTexto(telefono, msg);
         registrarLog(telefono, 'saliente', msg).catch(() => {});
       } else {
