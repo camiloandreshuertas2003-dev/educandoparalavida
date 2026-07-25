@@ -1,13 +1,13 @@
 const express = require('express');
 const router = express.Router();
 const adminController = require('../controllers/adminController');
-const { verificarToken, esAdmin } = require('../middlewares/authMiddleware');
+const { autenticarToken, esAdmin } = require('../middlewares/authMiddleware');
 
 // Ruta Pública: Autenticación
 router.post('/auth/login', adminController.login);
 
 // Rutas Protegidas (requieren JWT de Admin)
-router.use(verificarToken);
+router.use(autenticarToken);
 
 // Dashboard y Kanban
 router.get('/stats', adminController.getStats);
