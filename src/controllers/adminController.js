@@ -138,7 +138,7 @@ async function getKanban(req, res) {
   }
 }
 
-// 3. LEADS: Consultar y actualizar
+// 3. LEADS: Consultar, actualizar y eliminar
 async function getLeads(req, res) {
   try {
     const { estado, buscar } = req.query;
@@ -194,7 +194,18 @@ async function updateLead(req, res) {
   }
 }
 
-// 4. GRADOS Y NIVELES
+async function deleteLead(req, res) {
+  const { id } = req.params;
+  try {
+    await pool.query('DELETE FROM leads_fase2 WHERE id = ?', [id]);
+    res.json({ message: 'Lead eliminado correctamente' });
+  } catch (error) {
+    console.error('Error eliminando lead:', error);
+    res.status(500).json({ error: 'Error al eliminar el lead' });
+  }
+}
+
+// 4. GRADOS Y NIVELES: CRUD Completo
 async function getGrados(req, res) {
   try {
     const [grados] = await pool.query(`
@@ -216,7 +227,7 @@ async function saveGrado(req, res) {
     if (id) {
       await pool.query('UPDATE grados SET nivel_id=?, nombre=?, orden=?, activo=? WHERE id=?', [nivel_id, nombre, orden, activo, id]);
     } else {
-      await pool.query('INSERT INTO grados (nivel_id, nombre, orden, activo) VALUES (?, ?, ?, ?)', [nivel_id, nombre, orden || 0, activo ?? true]);
+      await pool.query('INSERT INTO grados (nivel_id, nombre, orden, activo) VALUES (?, ?, ?, ?)', [nivel_id || 1, nombre, orden || 0, activo ?? true]);
     }
     res.json({ message: 'Grado guardado con éxito' });
   } catch (error) {
@@ -225,7 +236,18 @@ async function saveGrado(req, res) {
   }
 }
 
-// 5. PAQUETES EDUCATIVOS
+async function deleteGrado(req, res) {
+  const { id } = req.params;
+  try {
+    await pool.query('DELETE FROM grados WHERE id = ?', [id]);
+    res.json({ message: 'Grado eliminado correctamente' });
+  } catch (error) {
+    console.error('Error eliminando grado:', error);
+    res.status(500).json({ error: 'Error al eliminar el grado' });
+  }
+}
+
+// 5. PAQUETES EDUCATIVOS: CRUD Completo
 async function getPaquetes(req, res) {
   try {
     const [paquetes] = await pool.query(`
@@ -262,7 +284,18 @@ async function savePaquete(req, res) {
   }
 }
 
-// 6. MENSAJES DEL BOT Y BASE DE CONOCIMIENTO (FAQS)
+async function deletePaquete(req, res) {
+  const { id } = req.params;
+  try {
+    await pool.query('DELETE FROM paquetes WHERE id = ?', [id]);
+    res.json({ message: 'Paquete eliminado correctamente' });
+  } catch (error) {
+    console.error('Error eliminando paquete:', error);
+    res.status(500).json({ error: 'Error al eliminar el paquete' });
+  }
+}
+
+// 6. MENSAJES DEL BOT: CRUD Completo
 async function getBotMensajes(req, res) {
   try {
     const [mensajes] = await pool.query('SELECT * FROM bot_mensajes ORDER BY id ASC');
@@ -273,18 +306,33 @@ async function getBotMensajes(req, res) {
   }
 }
 
-async function updateBotMensaje(req, res) {
-  const { id } = req.params;
-  const { contenido, activo } = req.body;
+async function saveBotMensaje(req, res) {
+  const { id, clave, titulo, contenido, activo } = req.body;
   try {
-    await pool.query('UPDATE bot_mensajes SET contenido=?, activo=? WHERE id=?', [contenido, activo, id]);
-    res.json({ message: 'Mensaje del bot actualizado con éxito' });
+    if (id) {
+      await pool.query('UPDATE bot_mensajes SET clave=?, titulo=?, contenido=?, activo=? WHERE id=?', [clave, titulo, contenido, activo ?? true, id]);
+    } else {
+      await pool.query('INSERT INTO bot_mensajes (clave, titulo, contenido, activo) VALUES (?, ?, ?, ?)', [clave, titulo, contenido, activo ?? true]);
+    }
+    res.json({ message: 'Mensaje del bot guardado con éxito' });
   } catch (error) {
-    console.error('Error actualizando mensaje del bot:', error);
-    res.status(500).json({ error: 'Error al actualizar mensaje del bot' });
+    console.error('Error guardando mensaje del bot:', error);
+    res.status(500).json({ error: 'Error al guardar mensaje del bot' });
   }
 }
 
+async function deleteBotMensaje(req, res) {
+  const { id } = req.params;
+  try {
+    await pool.query('DELETE FROM bot_mensajes WHERE id = ?', [id]);
+    res.json({ message: 'Mensaje del bot eliminado correctamente' });
+  } catch (error) {
+    console.error('Error eliminando mensaje del bot:', error);
+    res.status(500).json({ error: 'Error al eliminar mensaje del bot' });
+  }
+}
+
+// 7. BASE DE CONOCIMIENTO (FAQS): CRUD Completo
 async function getBaseConocimiento(req, res) {
   try {
     const [faqs] = await pool.query('SELECT * FROM base_conocimiento ORDER BY id DESC');
@@ -299,7 +347,7 @@ async function saveBaseConocimiento(req, res) {
   const { id, categoria, pregunta_frecuente, respuesta_aprobada, activo } = req.body;
   try {
     if (id) {
-      await pool.query('UPDATE base_conocimiento SET categoria=?, pregunta_frecuente=?, respuesta_aprobada=?, activo=? WHERE id=?', [categoria, pregunta_frecuente, respuesta_aprobada, activo, id]);
+      await pool.query('UPDATE base_conocimiento SET categoria=?, pregunta_frecuente=?, respuesta_aprobada=?, activo=? WHERE id=?', [categoria, pregunta_frecuente, respuesta_aprobada, activo ?? true, id]);
     } else {
       await pool.query('INSERT INTO base_conocimiento (categoria, pregunta_frecuente, respuesta_aprobada, activo) VALUES (?, ?, ?, ?)', [categoria || 'general', pregunta_frecuente, respuesta_aprobada, activo ?? true]);
     }
@@ -310,7 +358,18 @@ async function saveBaseConocimiento(req, res) {
   }
 }
 
-// 7. CONVERSACIONES Y LOGS
+async function deleteBaseConocimiento(req, res) {
+  const { id } = req.params;
+  try {
+    await pool.query('DELETE FROM base_conocimiento WHERE id = ?', [id]);
+    res.json({ message: 'Pregunta frecuente eliminada con éxito' });
+  } catch (error) {
+    console.error('Error eliminando de base de conocimiento:', error);
+    res.status(500).json({ error: 'Error al eliminar de la base de conocimiento' });
+  }
+}
+
+// 8. CONVERSACIONES Y LOGS
 async function getConversaciones(req, res) {
   try {
     const [rows] = await pool.query(`
@@ -348,14 +407,19 @@ module.exports = {
   getKanban,
   getLeads,
   updateLead,
+  deleteLead,
   getGrados,
   saveGrado,
+  deleteGrado,
   getPaquetes,
   savePaquete,
+  deletePaquete,
   getBotMensajes,
-  updateBotMensaje,
+  saveBotMensaje,
+  deleteBotMensaje,
   getBaseConocimiento,
   saveBaseConocimiento,
+  deleteBaseConocimiento,
   getConversaciones,
   getMensajesLog,
 };

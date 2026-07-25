@@ -22,12 +22,12 @@
       --color-muted: #6B7686;
 
       --radius-sm: 6px;
-      --radius-md: 10px;
-      --radius-lg: 16px;
+      --radius-md: 12px;
+      --radius-lg: 18px;
 
-      --shadow-sm: 0 1px 3px rgba(30,42,56,0.06);
-      --shadow-md: 0 4px 12px rgba(30,42,56,0.08);
-      --shadow-lg: 0 12px 32px rgba(30,42,56,0.12);
+      --shadow-sm: 0 2px 4px rgba(30,42,56,0.04);
+      --shadow-md: 0 6px 16px rgba(30,42,56,0.08);
+      --shadow-lg: 0 16px 36px rgba(30,42,56,0.12);
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -41,7 +41,7 @@
     }
 
     .icon {
-      width: 20px; height: 20px; stroke-width: 2;
+      width: 18px; height: 18px; stroke-width: 2;
       stroke: currentColor; fill: none; stroke-linecap: round; stroke-linejoin: round;
       display: inline-block; vertical-align: middle;
     }
@@ -64,6 +64,24 @@
     }
     .login-box h2 { font-size: 1.6rem; font-weight: 700; color: var(--color-ink); margin-bottom: 6px; }
     .login-box p { color: var(--color-muted); font-size: 0.9rem; margin-bottom: 24px; }
+
+    /* Modal Component */
+    .modal-overlay {
+      position: fixed; inset: 0; z-index: 999;
+      background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(4px);
+      display: none; align-items: center; justify-content: center; padding: 20px;
+    }
+    .modal-card {
+      background: var(--color-surface); border: 1px solid var(--color-border);
+      border-radius: var(--radius-lg); padding: 28px; max-width: 520px; width: 100%;
+      box-shadow: var(--shadow-lg); max-height: 90vh; overflow-y: auto;
+    }
+    .modal-header {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 20px; padding-bottom: 12px; border-bottom: 1px solid var(--color-border);
+    }
+    .modal-header h3 { font-size: 1.25rem; font-weight: 700; color: var(--color-ink); }
+    .close-btn { background: none; border: none; font-size: 1.2rem; cursor: pointer; color: var(--color-muted); }
 
     /* Layout Main */
     #app-view { display: flex; width: 100vw; min-height: 100vh; display: none; }
@@ -89,7 +107,6 @@
     }
     .nav-item.active .icon { stroke: var(--color-accent); }
 
-    /* Main Container */
     main { flex: 1; padding: 32px; overflow-y: auto; background-color: var(--color-bg); }
     header {
       display: flex; justify-content: space-between; align-items: center;
@@ -102,31 +119,36 @@
       font-size: 0.85rem; font-weight: 600; color: var(--color-ink);
     }
 
-    /* Kanban Board Styles */
+    /* Executive KANBAN Board */
     .kanban-board {
-      display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px;
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px;
       align-items: start;
     }
     .kanban-col {
-      background: rgba(255, 255, 255, 0.6); border: 1px solid var(--color-border);
-      border-radius: var(--radius-md); padding: 16px; min-height: 400px;
+      background: rgba(255, 255, 255, 0.75); border: 1px solid var(--color-border);
+      border-radius: var(--radius-md); padding: 18px; min-height: 480px; box-shadow: var(--shadow-sm);
     }
     .kanban-title {
-      font-size: 0.9rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
-      margin-bottom: 16px; padding-bottom: 8px; border-bottom: 2px solid var(--color-border);
-      display: flex; justify-content: space-between; align-items: center;
+      font-size: 0.85rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+      margin-bottom: 18px; padding-bottom: 10px; border-bottom: 2px solid var(--color-border);
+      display: flex; justify-content: space-between; align-items: center; color: var(--color-ink);
     }
     .kanban-card {
       background: var(--color-surface); border: 1px solid var(--color-border);
-      border-radius: var(--radius-sm); padding: 16px; margin-bottom: 12px;
-      box-shadow: var(--shadow-sm); cursor: pointer; transition: transform 0.15s;
+      border-radius: var(--radius-md); padding: 16px; margin-bottom: 14px;
+      box-shadow: var(--shadow-sm); transition: all 0.2s ease; position: relative;
     }
-    .kanban-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
-    .kanban-name { font-weight: 700; font-size: 0.95rem; margin-bottom: 4px; color: var(--color-ink); }
-    .kanban-phone { font-size: 0.85rem; color: var(--color-muted); margin-bottom: 8px; }
+    .kanban-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); border-color: var(--color-primary); }
+    .kanban-name { font-weight: 700; font-size: 1rem; margin-bottom: 6px; color: var(--color-ink); }
+    .kanban-phone { font-size: 0.85rem; color: var(--color-muted); margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
+    .kanban-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; pt-2; border-top: 1px solid var(--color-border); }
     .kanban-score {
       font-size: 0.75rem; font-weight: 700; background: rgba(232, 163, 61, 0.15);
-      color: var(--color-accent); padding: 2px 8px; border-radius: 9999px; display: inline-block;
+      color: var(--color-accent); padding: 4px 10px; border-radius: 9999px; display: inline-flex; align-items: center; gap: 4px;
+    }
+    .kanban-select {
+      font-size: 0.8rem; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--color-border);
+      background: var(--color-bg); font-weight: 600; color: var(--color-ink); cursor: pointer;
     }
 
     /* Cards & Stats */
@@ -138,7 +160,7 @@
     .stat-label { font-size: 0.8rem; color: var(--color-muted); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
     .stat-value { font-size: 2rem; font-weight: 700; margin-top: 8px; color: var(--color-ink); }
 
-    /* Table Container */
+    /* Tables */
     .table-container {
       background: var(--color-surface); border: 1px solid var(--color-border);
       border-radius: var(--radius-md); padding: 24px; box-shadow: var(--shadow-sm);
@@ -161,7 +183,7 @@
     .badge-matriculado { border-left-color: var(--color-success); background: rgba(62, 142, 90, 0.1); color: var(--color-success); }
     .badge-descartado { border-left-color: var(--color-danger); background: rgba(192, 70, 60, 0.1); color: var(--color-danger); }
 
-    .input-group { margin-bottom: 20px; text-align: left; }
+    .input-group { margin-bottom: 18px; text-align: left; }
     label { display: block; font-size: 0.85rem; color: var(--color-ink); margin-bottom: 6px; font-weight: 600; }
     input, select, textarea {
       width: 100%; padding: 12px 16px; background: var(--color-surface);
@@ -178,6 +200,8 @@
     .btn:hover { background: var(--color-primary-dark); }
     .btn-secondary { background: var(--color-bg); color: var(--color-ink); border: 1px solid var(--color-border); }
     .btn-secondary:hover { background: #EAE6DF; }
+    .btn-danger { background: rgba(192, 70, 60, 0.1); color: var(--color-danger); border: 1px solid rgba(192, 70, 60, 0.2); }
+    .btn-danger:hover { background: var(--color-danger); color: #FFF; }
     .btn-sm { padding: 6px 12px; font-size: 0.8rem; }
 
     .mobile-nav {
@@ -191,17 +215,21 @@
     }
     .mobile-nav-item.active { color: var(--color-accent); font-weight: 600; }
 
+    @media (max-width: 1024px) {
+      .kanban-board { grid-template-columns: repeat(2, 1fr); }
+    }
     @media (max-width: 768px) {
       sidebar { display: none; }
       .mobile-nav { display: flex; }
       main { padding: 16px; padding-bottom: 80px; }
       header { flex-direction: column; align-items: flex-start; gap: 12px; }
+      .kanban-board { grid-template-columns: 1fr; }
     }
   </style>
 </head>
 <body>
 
-  <!-- Icons Library (Lucide SVG) -->
+  <!-- SVG Icons Library -->
   <svg style="display: none;">
     <symbol id="icon-school" viewBox="0 0 24 24"><path d="M14 22v-4a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v4"/><path d="M18 10l4 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-8l4-2"/><path d="M18 5v17"/><path d="M6 5v17"/><path d="M12 2l10 5H2l10-5z"/></symbol>
     <symbol id="icon-dashboard" viewBox="0 0 24 24"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></symbol>
@@ -212,7 +240,10 @@
     <symbol id="icon-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></symbol>
     <symbol id="icon-logout" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></symbol>
     <symbol id="icon-edit" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></symbol>
+    <symbol id="icon-trash" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></symbol>
     <symbol id="icon-plus" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></symbol>
+    <symbol id="icon-phone" viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></symbol>
+    <symbol id="icon-star" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></symbol>
   </svg>
 
   <!-- Login View -->
@@ -233,6 +264,23 @@
           <input type="password" id="login-password" value="admin12345" required>
         </div>
         <button type="submit" class="btn" style="width: 100%; justify-content: center;">Iniciar Sesión</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Generic Modal Dialog -->
+  <div class="modal-overlay" id="generic-modal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="modal-title">Editar Elemento</h3>
+        <button class="close-btn" onclick="closeModal()">✕</button>
+      </div>
+      <form id="modal-form">
+        <div id="modal-body"></div>
+        <div style="display: flex; gap: 12px; justify-content: flex-end; margin-top: 20px;">
+          <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+          <button type="submit" class="btn">Guardar Cambios</button>
+        </div>
       </form>
     </div>
   </div>
@@ -310,7 +358,7 @@
         </div>
       </section>
 
-      <!-- Tab 2: Embudo Kanban -->
+      <!-- Tab 2: Embudo Kanban Elegante -->
       <section id="tab-kanban" style="display: none;">
         <div class="kanban-board">
           <div class="kanban-col">
@@ -343,6 +391,7 @@
               <option value="contactado">Contactado</option>
               <option value="en_proceso">En Proceso</option>
               <option value="matriculado">Matriculado</option>
+              <option value="descartado">Descartado</option>
             </select>
           </div>
           <table>
@@ -364,10 +413,13 @@
         </div>
       </section>
 
-      <!-- Tab 4: Grados -->
+      <!-- Tab 4: Oferta Académica (Grados & Paquetes) -->
       <section id="tab-grados" style="display: none;">
         <div class="table-container">
-          <h3 style="margin-bottom: 16px; font-weight: 600;">Oferta Académica Vigente</h3>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <h3 style="font-weight: 600;">Oferta Académica Vigente</h3>
+            <button class="btn btn-sm" onclick="modalCrearGrado()"><svg class="icon"><use href="#icon-plus"/></svg> Nuevo Grado</button>
+          </div>
           <table>
             <thead>
               <tr>
@@ -375,10 +427,11 @@
                 <th>Nombre del Grado</th>
                 <th>Nivel Educativo</th>
                 <th>Estado</th>
+                <th>Acciones</th>
               </tr>
             </thead>
             <tbody id="tbl-grados">
-              <tr><td colspan="4" style="text-align:center;">Cargando información...</td></tr>
+              <tr><td colspan="5" style="text-align:center;">Cargando información...</td></tr>
             </tbody>
           </table>
         </div>
@@ -389,7 +442,7 @@
         <div class="table-container">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
             <h3 style="font-weight: 600;">Base de Conocimiento y Entrenamiento del Bot</h3>
-            <button class="btn btn-sm" onclick="crearFaq()"><svg class="icon"><use href="#icon-plus"/></svg> Nueva Pregunta</button>
+            <button class="btn btn-sm" onclick="modalCrearFaq()"><svg class="icon"><use href="#icon-plus"/></svg> Nueva Pregunta</button>
           </div>
           <table>
             <thead>
@@ -398,19 +451,23 @@
                 <th>Pregunta Frecuente</th>
                 <th>Respuesta Oficial Aprobada</th>
                 <th>Estado</th>
+                <th>Acciones</th>
               </tr>
             </thead>
             <tbody id="tbl-faqs">
-              <tr><td colspan="4" style="text-align:center;">Cargando información...</td></tr>
+              <tr><td colspan="5" style="text-align:center;">Cargando información...</td></tr>
             </tbody>
           </table>
         </div>
       </section>
 
-      <!-- Tab 6: Bot Config -->
+      <!-- Tab 6: Textos Administrables del Bot -->
       <section id="tab-bot" style="display: none;">
         <div class="table-container">
-          <h3 style="margin-bottom: 16px; font-weight: 600;">Textos Administrables del Bot</h3>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <h3 style="font-weight: 600;">Textos Administrables del Bot</h3>
+            <button class="btn btn-sm" onclick="modalCrearBotMsg()"><svg class="icon"><use href="#icon-plus"/></svg> Nuevo Texto</button>
+          </div>
           <table>
             <thead>
               <tr>
@@ -452,6 +509,7 @@
 
   <script>
     let token = localStorage.getItem('token');
+    let onModalSubmitCallback = null;
 
     if (token) {
       showApp();
@@ -481,6 +539,26 @@
         alert('Error al conectar con la API');
       }
     });
+
+    document.getElementById('modal-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (onModalSubmitCallback) {
+        await onModalSubmitCallback();
+        closeModal();
+      }
+    });
+
+    function openModal(title, htmlContent, submitFn) {
+      document.getElementById('modal-title').innerText = title;
+      document.getElementById('modal-body').innerHTML = htmlContent;
+      onModalSubmitCallback = submitFn;
+      document.getElementById('generic-modal').style.display = 'flex';
+    }
+
+    function closeModal() {
+      document.getElementById('generic-modal').style.display = 'none';
+      onModalSubmitCallback = null;
+    }
 
     function showApp() {
       document.getElementById('login-view').style.display = 'none';
@@ -544,13 +622,32 @@
         const list = data[col] || [];
         document.getElementById(`cnt-${col}`).innerText = list.length;
         container.innerHTML = list.map(l => `
-          <div class="kanban-card" onclick="cambiarEstado(${l.id})">
+          <div class="kanban-card">
             <div class="kanban-name">${l.nombre_contacto || 'Prospecto'} ${l.apellido_contacto || ''}</div>
-            <div class="kanban-phone">${l.telefono} • ${l.grado_nombre || 'Sin grado'}</div>
-            <div class="kanban-score">Scoring: ${l.puntaje || 10} pts</div>
+            <div class="kanban-phone"><svg class="icon"><use href="#icon-phone"/></svg> ${l.telefono} • ${l.grado_nombre || 'Sin grado'}</div>
+            <div class="kanban-footer">
+              <span class="kanban-score"><svg class="icon"><use href="#icon-star"/></svg> ${l.puntaje || 10} pts</span>
+              <select class="kanban-select" onchange="cambiarEstadoDirecto(${l.id}, this.value)">
+                <option value="nuevo" ${l.estado_embudo === 'nuevo' ? 'selected' : ''}>Nuevo</option>
+                <option value="contactado" ${l.estado_embudo === 'contactado' ? 'selected' : ''}>Contactado</option>
+                <option value="en_proceso" ${l.estado_embudo === 'en_proceso' ? 'selected' : ''}>En Proceso</option>
+                <option value="matriculado" ${l.estado_embudo === 'matriculado' ? 'selected' : ''}>Matriculado</option>
+                <option value="descartado" ${l.estado_embudo === 'descartado' ? 'selected' : ''}>Descartado</option>
+              </select>
+            </div>
           </div>
         `).join('');
       });
+    }
+
+    async function cambiarEstadoDirecto(id, nuevoEstado) {
+      await apiFetch(`/api/admin/leads/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ estado_embudo: nuevoEstado })
+      });
+      fetchKanban();
+      fetchLeads();
     }
 
     async function fetchLeads() {
@@ -564,40 +661,33 @@
           <td><strong>${l.nombre_contacto || ''} ${l.apellido_contacto || ''}</strong></td>
           <td>${l.telefono}</td>
           <td>${l.grado_nombre || l.programa_interes || 'Sin definir'}</td>
-          <td><span class="kanban-score">${l.puntaje || 10} pts</span></td>
-          <td><span class="badge-tab badge-${l.estado_embudo}">${l.estado_embudo}</span></td>
+          <td><span class="kanban-score"><svg class="icon"><use href="#icon-star"/></svg> ${l.puntaje || 10} pts</span></td>
+          <td>
+            <select class="kanban-select" onchange="cambiarEstadoDirecto(${l.id}, this.value)">
+              <option value="nuevo" ${l.estado_embudo === 'nuevo' ? 'selected' : ''}>Nuevo</option>
+              <option value="contactado" ${l.estado_embudo === 'contactado' ? 'selected' : ''}>Contactado</option>
+              <option value="en_proceso" ${l.estado_embudo === 'en_proceso' ? 'selected' : ''}>En Proceso</option>
+              <option value="matriculado" ${l.estado_embudo === 'matriculado' ? 'selected' : ''}>Matriculado</option>
+              <option value="descartado" ${l.estado_embudo === 'descartado' ? 'selected' : ''}>Descartado</option>
+            </select>
+          </td>
           <td>${new Date(l.fecha_registro).toLocaleDateString()}</td>
-          <td><button class="btn btn-sm btn-secondary" onclick="cambiarEstado(${l.id})"><svg class="icon"><use href="#icon-edit"/></svg> Estado</button></td>
+          <td>
+            <button class="btn btn-sm btn-danger" onclick="eliminarLead(${l.id})"><svg class="icon"><use href="#icon-trash"/></svg> Borrar</button>
+          </td>
         </tr>
       `).join('');
     }
 
-    async function cambiarEstado(id) {
-      const nuevo = prompt('Nuevo estado: nuevo, contactado, en_proceso, matriculado, descartado');
-      if (nuevo) {
-        await apiFetch(`/api/admin/leads/${id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ estado_embudo: nuevo })
-        });
+    async function eliminarLead(id) {
+      if (confirm('¿Está seguro de eliminar este prospecto?')) {
+        await apiFetch(`/api/admin/leads/${id}`, { method: 'DELETE' });
         fetchLeads();
         fetchKanban();
       }
     }
 
-    async function fetchGrados() {
-      const grados = await apiFetch('/api/admin/grados');
-      const tbody = document.getElementById('tbl-grados');
-      tbody.innerHTML = grados.map(g => `
-        <tr>
-          <td>${g.id}</td>
-          <td><strong>${g.nombre}</strong></td>
-          <td>${g.nivel_nombre}</td>
-          <td>${g.activo ? '<span style="color:var(--color-success); font-weight:600;">Activo</span>' : '<span style="color:var(--color-danger);">Inactivo</span>'}</td>
-        </tr>
-      `).join('');
-    }
-
+    // FAQs (Base de Conocimiento) Modal & CRUD
     async function fetchFaqs() {
       const faqs = await apiFetch('/api/admin/base-conocimiento');
       const tbody = document.getElementById('tbl-faqs');
@@ -607,23 +697,168 @@
           <td><strong>${f.pregunta_frecuente}</strong></td>
           <td style="max-width:350px; white-space:pre-wrap;">${f.respuesta_aprobada}</td>
           <td>${f.activo ? '<span style="color:var(--color-success); font-weight:600;">Activa</span>' : '<span style="color:var(--color-danger);">Inactiva</span>'}</td>
+          <td>
+            <div style="display:flex; gap:6px;">
+              <button class="btn btn-sm btn-secondary" onclick="modalEditarFaq(${f.id}, '${encodeURIComponent(f.categoria)}', '${encodeURIComponent(f.pregunta_frecuente)}', '${encodeURIComponent(f.respuesta_aprobada)}', ${f.activo})"><svg class="icon"><use href="#icon-edit"/></svg> Editar</button>
+              <button class="btn btn-sm btn-danger" onclick="eliminarFaq(${f.id})"><svg class="icon"><use href="#icon-trash"/></svg></button>
+            </div>
+          </td>
         </tr>
       `).join('');
     }
 
-    async function crearFaq() {
-      const pregunta = prompt('Pregunta frecuente:');
-      const respuesta = prompt('Respuesta oficial aprobada:');
-      if (pregunta && respuesta) {
+    function modalCrearFaq() {
+      const html = `
+        <div class="input-group">
+          <label>Categoría</label>
+          <input type="text" id="faq-cat" value="general" required>
+        </div>
+        <div class="input-group">
+          <label>Pregunta Frecuente</label>
+          <input type="text" id="faq-preg" required placeholder="Ej: ¿Cuáles son las pensiones?">
+        </div>
+        <div class="input-group">
+          <label>Respuesta Oficial Aprobada</label>
+          <textarea id="faq-resp" rows="4" required placeholder="Respuesta del colegio..."></textarea>
+        </div>
+      `;
+      openModal('Nueva Pregunta Frecuente', html, async () => {
         await apiFetch('/api/admin/base-conocimiento', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ categoria: 'general', pregunta_frecuente: pregunta, respuesta_aprobada: respuesta, activo: true })
+          body: JSON.stringify({
+            categoria: document.getElementById('faq-cat').value,
+            pregunta_frecuente: document.getElementById('faq-preg').value,
+            respuesta_aprobada: document.getElementById('faq-resp').value,
+            activo: true
+          })
         });
+        fetchFaqs();
+      });
+    }
+
+    function modalEditarFaq(id, catEnc, pregEnc, respEnc, activo) {
+      const cat = decodeURIComponent(catEnc);
+      const preg = decodeURIComponent(pregEnc);
+      const resp = decodeURIComponent(respEnc);
+
+      const html = `
+        <div class="input-group">
+          <label>Categoría</label>
+          <input type="text" id="faq-cat" value="${cat}" required>
+        </div>
+        <div class="input-group">
+          <label>Pregunta Frecuente</label>
+          <input type="text" id="faq-preg" value="${preg}" required>
+        </div>
+        <div class="input-group">
+          <label>Respuesta Oficial Aprobada</label>
+          <textarea id="faq-resp" rows="4" required>${resp}</textarea>
+        </div>
+      `;
+      openModal('Editar Pregunta Frecuente', html, async () => {
+        await apiFetch('/api/admin/base-conocimiento', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id,
+            categoria: document.getElementById('faq-cat').value,
+            pregunta_frecuente: document.getElementById('faq-preg').value,
+            respuesta_aprobada: document.getElementById('faq-resp').value,
+            activo: true
+          })
+        });
+        fetchFaqs();
+      });
+    }
+
+    async function eliminarFaq(id) {
+      if (confirm('¿Está seguro de eliminar esta pregunta frecuente?')) {
+        await apiFetch(`/api/admin/base-conocimiento/${id}`, { method: 'DELETE' });
         fetchFaqs();
       }
     }
 
+    // Grados (Oferta Académica) Modal & CRUD
+    async function fetchGrados() {
+      const grados = await apiFetch('/api/admin/grados');
+      const tbody = document.getElementById('tbl-grados');
+      tbody.innerHTML = grados.map(g => `
+        <tr>
+          <td>${g.id}</td>
+          <td><strong>${g.nombre}</strong></td>
+          <td>${g.nivel_nombre}</td>
+          <td>${g.activo ? '<span style="color:var(--color-success); font-weight:600;">Activo</span>' : '<span style="color:var(--color-danger);">Inactivo</span>'}</td>
+          <td>
+            <div style="display:flex; gap:6px;">
+              <button class="btn btn-sm btn-secondary" onclick="modalEditarGrado(${g.id}, '${encodeURIComponent(g.nombre)}', ${g.nivel_id}, ${g.activo})"><svg class="icon"><use href="#icon-edit"/></svg> Editar</button>
+              <button class="btn btn-sm btn-danger" onclick="eliminarGrado(${g.id})"><svg class="icon"><use href="#icon-trash"/></svg></button>
+            </div>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    function modalCrearGrado() {
+      const html = `
+        <div class="input-group">
+          <label>Nombre del Grado</label>
+          <input type="text" id="grado-nombre" required placeholder="Ej: Grado 10 - Media Académica">
+        </div>
+        <div class="input-group">
+          <label>ID Nivel Educativo</label>
+          <input type="number" id="grado-nivel" value="1" required>
+        </div>
+      `;
+      openModal('Nuevo Grado Académico', html, async () => {
+        await apiFetch('/api/admin/grados', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            nombre: document.getElementById('grado-nombre').value,
+            nivel_id: Number(document.getElementById('grado-nivel').value),
+            activo: true
+          })
+        });
+        fetchGrados();
+      });
+    }
+
+    function modalEditarGrado(id, nomEnc, nivelId, activo) {
+      const nom = decodeURIComponent(nomEnc);
+      const html = `
+        <div class="input-group">
+          <label>Nombre del Grado</label>
+          <input type="text" id="grado-nombre" value="${nom}" required>
+        </div>
+        <div class="input-group">
+          <label>ID Nivel Educativo</label>
+          <input type="number" id="grado-nivel" value="${nivelId}" required>
+        </div>
+      `;
+      openModal('Editar Grado Académico', html, async () => {
+        await apiFetch('/api/admin/grados', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id,
+            nombre: document.getElementById('grado-nombre').value,
+            nivel_id: Number(document.getElementById('grado-nivel').value),
+            activo: true
+          })
+        });
+        fetchGrados();
+      });
+    }
+
+    async function eliminarGrado(id) {
+      if (confirm('¿Está seguro de eliminar este grado?')) {
+        await apiFetch(`/api/admin/grados/${id}`, { method: 'DELETE' });
+        fetchGrados();
+      }
+    }
+
+    // Bot Mensajes Modal & CRUD
     async function fetchBot() {
       const msgs = await apiFetch('/api/admin/bot-mensajes');
       const tbody = document.getElementById('tbl-bot');
@@ -632,19 +867,84 @@
           <td><code>${m.clave}</code></td>
           <td><strong>${m.titulo}</strong></td>
           <td style="max-width:300px; white-space:pre-wrap;">${m.contenido}</td>
-          <td><button class="btn btn-sm btn-secondary" onclick="editarBotMsg(${m.id}, '${m.clave}')"><svg class="icon"><use href="#icon-edit"/></svg> Editar</button></td>
+          <td>
+            <div style="display:flex; gap:6px;">
+              <button class="btn btn-sm btn-secondary" onclick="modalEditarBotMsg(${m.id}, '${encodeURIComponent(m.clave)}', '${encodeURIComponent(m.titulo)}', '${encodeURIComponent(m.contenido)}')"><svg class="icon"><use href="#icon-edit"/></svg> Editar</button>
+              <button class="btn btn-sm btn-danger" onclick="eliminarBotMsg(${m.id})"><svg class="icon"><use href="#icon-trash"/></svg></button>
+            </div>
+          </td>
         </tr>
       `).join('');
     }
 
-    async function editarBotMsg(id, clave) {
-      const nuevoTexto = prompt('Nuevo texto del mensaje:');
-      if (nuevoTexto) {
-        await apiFetch(`/api/admin/bot-mensajes/${id}`, {
-          method: 'PUT',
+    function modalCrearBotMsg() {
+      const html = `
+        <div class="input-group">
+          <label>Clave Única (slug)</label>
+          <input type="text" id="bot-clave" required placeholder="Ej: bienvenida_descuento">
+        </div>
+        <div class="input-group">
+          <label>Título Informativo</label>
+          <input type="text" id="bot-titulo" required placeholder="Ej: Mensaje de Promoción">
+        </div>
+        <div class="input-group">
+          <label>Contenido del Mensaje</label>
+          <textarea id="bot-contenido" rows="4" required placeholder="Texto formal que enviará el bot..."></textarea>
+        </div>
+      `;
+      openModal('Nuevo Texto del Bot', html, async () => {
+        await apiFetch('/api/admin/bot-mensajes', {
+          method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ contenido: nuevoTexto, activo: true })
+          body: JSON.stringify({
+            clave: document.getElementById('bot-clave').value,
+            titulo: document.getElementById('bot-titulo').value,
+            contenido: document.getElementById('bot-contenido').value,
+            activo: true
+          })
         });
+        fetchBot();
+      });
+    }
+
+    function modalEditarBotMsg(id, claveEnc, titEnc, contEnc) {
+      const clave = decodeURIComponent(claveEnc);
+      const tit = decodeURIComponent(titEnc);
+      const cont = decodeURIComponent(contEnc);
+
+      const html = `
+        <div class="input-group">
+          <label>Clave Única</label>
+          <input type="text" id="bot-clave" value="${clave}" required readonly style="background:#EAE6DF;">
+        </div>
+        <div class="input-group">
+          <label>Título Informativo</label>
+          <input type="text" id="bot-titulo" value="${tit}" required>
+        </div>
+        <div class="input-group">
+          <label>Contenido del Mensaje</label>
+          <textarea id="bot-contenido" rows="4" required>${cont}</textarea>
+        </div>
+      `;
+      openModal('Editar Texto del Bot', html, async () => {
+        await apiFetch('/api/admin/bot-mensajes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id,
+            clave: document.getElementById('bot-clave').value,
+            titulo: document.getElementById('bot-titulo').value,
+            contenido: document.getElementById('bot-contenido').value,
+            activo: true
+          })
+        });
+        fetchBot();
+      });
+    }
+
+    async function eliminarBotMsg(id) {
+      if (confirm('¿Está seguro de eliminar este texto del bot?')) {
+        await apiFetch(`/api/admin/bot-mensajes/${id}`, { method: 'DELETE' });
         fetchBot();
       }
     }
