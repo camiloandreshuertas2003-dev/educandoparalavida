@@ -18,14 +18,15 @@ app.use(express.json({
 }));
 app.use(express.urlencoded({ extended: true }));
 
-// Manejar favicon.ico
+// Manejar favicon.ico y favicon.png
 app.get('/favicon.ico', (req, res) => res.status(204).end());
+app.get('/favicon.png', (req, res) => res.status(204).end());
 
 // Endpoint JSON para comprobaciones de salud (healthcheck)
 app.get('/health', (req, res) => {
   res.json({
     status: 'online',
-    app: 'Bot WhatsApp Colegio - Educando para la Vida (Fase 2)',
+    app: 'Bot WhatsApp Colegio - Educando para la Vida',
     timestamp: new Date().toISOString(),
   });
 });
@@ -36,10 +37,19 @@ app.use('/api/admin', adminRoutes);
 // Rutas del Webhook de WhatsApp
 app.use('/webhook', webhookRoutes);
 
-// Servir la SPA del Panel de Control en la raíz y en /panel
+// Servir archivos estáticos de public
 app.use(express.static(path.join(__dirname, '../public')));
 
-app.get(['/', '/panel', '/admin'], (req, res) => {
+// Servir la SPA del Panel de Control en rutas explícitas de string (compatibles con Vercel Serverless)
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/index.html'));
+});
+
+app.get('/panel', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/index.html'));
+});
+
+app.get('/admin', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/index.html'));
 });
 
