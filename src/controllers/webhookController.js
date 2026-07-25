@@ -47,7 +47,7 @@ async function recibirMensaje(req, res) {
         let textoMensaje = '';
 
         if (msg.type === 'text') {
-          textoMensaje = msg.text.body;
+          textoMensaje = msg.text ? msg.text.body : '';
         } else if (msg.type === 'interactive') {
           if (msg.interactive.type === 'list_reply') {
             textoMensaje = msg.interactive.list_reply.title;
@@ -58,20 +58,20 @@ async function recibirMensaje(req, res) {
 
         console.log(` Mensaje recibido de ${from}: "${textoMensaje}"`);
 
-        // Procesar en segundo plano para responder rápido a Meta (< 3 segundos)
-        procesarMensaje(from, textoMensaje).catch((err) => {
-          console.error(' Error procesando flujo conversacional:', err);
-        });
+        // IMPORTANTE PARA VERCEL SERVERLESS:
+        // Await completo de la función para evitar congelamiento de la lambda antes de enviar el mensaje a Meta
+        await procesarMensaje(from, textoMensaje);
       }
 
-      // Meta exige responder 200 OK inmediatamente
+      // Meta exige responder 200 OK
       return res.status(200).send('EVENT_RECEIVED');
     }
 
     res.sendStatus(404);
   } catch (error) {
     console.error(' Error en POST /webhook:', error);
-    res.status(500).send('Error interno');
+    // Responder 200 a Meta para evitar reintentos fallidos desmedidos
+    return res.status(200).send('EVENT_RECEIVED');
   }
 }
 

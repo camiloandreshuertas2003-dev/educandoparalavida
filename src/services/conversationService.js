@@ -10,6 +10,9 @@ const PROGRAMAS_DISPONIBLES = [
   'Otro / Información General',
 ];
 
+// Fallback en memoria por si la base de datos remota no responde a tiempo
+const estadosEnMemoria = new Map();
+
 /**
  * Obtener o crear el estado de la conversación para un número determinado
  */
@@ -20,11 +23,11 @@ async function obtenerEstadoConversacion(telefono) {
       [telefono]
     );
 
-    if (rows.length > 0) {
+    if (rows && rows.length > 0) {
       return rows[0];
     }
 
-    // Crear nuevo estado inicial
+    // Crear nuevo estado inicial en BD
     await pool.query(
       'INSERT INTO conversaciones (telefono, paso_actual) VALUES (?, ?)',
       [telefono, 'inicio']
@@ -39,13 +42,23 @@ async function obtenerEstadoConversacion(telefono) {
       programa_temp: null,
     };
   } catch (error) {
-    console.error('Error al obtener estado conversacional:', error.message);
-    return { paso_actual: 'inicio' };
+    console.warn('⚠️ Base de Datos no disponible temporalmente, utilizando estado en memoria:', error.message);
+    if (!estadosEnMemoria.has(telefono)) {
+      estadosEnMemoria.set(telefono, {
+        telefono,
+        paso_actual: 'inicio',
+        nombre_temp: null,
+        apellido_temp: null,
+        telefono_temp: null,
+        programa_temp: null,
+      });
+    }
+    return estadosEnMemoria.get(telefono);
   }
 }
 
 /**
- * Actualizar el estado de la conversación en la BD
+ * Actualizar el estado de la conversación en la BD (o memoria fallback)
  */
 async function actualizarConversacion(telefono, nuevosCampos) {
   try {
@@ -59,8 +72,12 @@ async function actualizarConversacion(telefono, nuevosCampos) {
       values
     );
   } catch (error) {
-    console.error('Error al actualizar conversación:', error.message);
+    console.warn('⚠️ No se pudo actualizar estado en MySQL, actualizando en memoria:', error.message);
   }
+
+  // Actualizar siempre en memoria por respaldo
+  const actual = estadosEnMemoria.get(telefono) || { telefono, paso_actual: 'inicio' };
+  estadosEnMemoria.set(telefono, { ...actual, ...nuevosCampos });
 }
 
 /**
@@ -74,9 +91,9 @@ async function guardarLead(telefono, nombre, apellido, programa) {
        ON DUPLICATE KEY UPDATE nombre=?, apellido=?, programa_interes=?, fecha_registro=NOW()`,
       [telefono, nombre, apellido, programa, nombre, apellido, programa]
     );
-    console.log(` Lead guardado exitosamente para ${nombre} ${apellido} (${telefono})`);
+    console.log(` Lead guardado exitosamente en MySQL para ${nombre} ${apellido} (${telefono})`);
   } catch (error) {
-    console.error('Error al guardar lead en MySQL:', error.message);
+    console.error('⚠️ Error al guardar lead en MySQL:', error.message);
   }
 }
 
@@ -90,7 +107,7 @@ async function registrarLog(telefono, direccion, contenido) {
       [telefono, direccion, contenido]
     );
   } catch (error) {
-    console.error('Error guardando log de mensaje:', error.message);
+    // Ignorar si falla el log para no interrumpir la experiencia del usuario
   }
 }
 
