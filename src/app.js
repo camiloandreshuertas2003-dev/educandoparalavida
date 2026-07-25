@@ -7,9 +7,13 @@ const webhookRoutes = require('./routes/webhookRoutes');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middlewares
+// Middlewares - Capturamos el buffer rawBody para verificar firmas de webhook si es necesario
 app.use(cors());
-app.use(express.json());
+app.use(express.json({
+  verify: (req, res, buf) => {
+    req.rawBody = buf;
+  }
+}));
 app.use(express.urlencoded({ extended: true }));
 
 // Manejar favicon.ico para evitar error 404 en el navegador

@@ -1,7 +1,39 @@
+const crypto = require('crypto');
 const { procesarMensaje } = require('../services/conversationService');
 require('dotenv').config();
 
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || 'colegio_bot_secret_token_2026';
+const APP_SECRET = process.env.APP_SECRET;
+
+/**
+ * Validar la firma X-Hub-Signature-256 enviada por Meta
+ */
+function validarFirmaMeta(req) {
+  if (!APP_SECRET) {
+    // Si no está configurada la firma, permitimos pasar por retrocompatibilidad
+    return true;
+  }
+
+  const signatureHeader = req.headers['x-hub-signature-256'];
+  if (!signatureHeader) {
+    return false;
+  }
+
+  const signatureParts = signatureHeader.split('=');
+  if (signatureParts.length !== 2 || signatureParts[0] !== 'sha256') {
+    return false;
+  }
+
+  const signature = signatureParts[1];
+  const payload = req.rawBody; // Buffer obtenido de express.json()
+
+  const expectedSignature = crypto
+    .createHmac('sha256', APP_SECRET)
+    .update(payload)
+    .digest('hex');
+
+  return crypto.timingSafeEqual(Buffer.from(signature, 'hex'), Buffer.from(expectedSignature, 'hex'));
+}
 
 /**
  * GET /webhook
@@ -31,6 +63,12 @@ function verificarWebhook(req, res) {
  */
 async function recibirMensaje(req, res) {
   try {
+    // Validar firma de seguridad si APP_SECRET está presente
+    if (APP_SECRET && !validarFirmaMeta(req)) {
+      console.warn('⚠️ Intento de acceso no autorizado: firma de webhook no válida.');
+      return res.sendStatus(403);
+    }
+
     const body = req.body;
 
     // Verificar si es un evento de WhatsApp Cloud API
@@ -58,19 +96,16 @@ async function recibirMensaje(req, res) {
 
         console.log(` Mensaje recibido de ${from}: "${textoMensaje}"`);
 
-        // IMPORTANTE PARA VERCEL SERVERLESS:
-        // Await completo de la función para evitar congelamiento de la lambda antes de enviar el mensaje a Meta
+        // Await completo para evitar congelamiento de lambda en Vercel
         await procesarMensaje(from, textoMensaje);
       }
 
-      // Meta exige responder 200 OK
       return res.status(200).send('EVENT_RECEIVED');
     }
 
     res.sendStatus(404);
   } catch (error) {
     console.error(' Error en POST /webhook:', error);
-    // Responder 200 a Meta para evitar reintentos fallidos desmedidos
     return res.status(200).send('EVENT_RECEIVED');
   }
 }
