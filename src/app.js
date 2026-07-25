@@ -31,6 +31,11 @@ app.get('/health', (req, res) => {
   });
 });
 
+// Política de Privacidad para Meta WhatsApp Cloud API
+app.get('/politica-privacidad', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/politica-privacidad.html'));
+});
+
 // Rutas de la API de Administración del Panel de Control
 app.use('/api/admin', adminRoutes);
 
@@ -40,7 +45,7 @@ app.use('/webhook', webhookRoutes);
 // Servir archivos estáticos de public
 app.use(express.static(path.join(__dirname, '../public')));
 
-// Servir la SPA del Panel de Control en rutas explícitas de string (compatibles con Vercel Serverless)
+// Servir la SPA del Panel de Control en rutas explícitas de string
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/index.html'));
 });
