@@ -2,12 +2,12 @@ const axios = require('axios');
 require('dotenv').config();
 
 function getMetaUrl() {
-  const phoneNumberId = process.env.PHONE_NUMBER_ID || '1150165518190644';
+  const phoneNumberId = (process.env.PHONE_NUMBER_ID || '1150165518190644').trim();
   return `https://graph.facebook.com/v21.0/${phoneNumberId}/messages`;
 }
 
 function getAuthToken() {
-  return process.env.WHATSAPP_TOKEN || '';
+  return (process.env.WHATSAPP_TOKEN || '').trim().replace(/^["']|["']$/g, '');
 }
 
 /**

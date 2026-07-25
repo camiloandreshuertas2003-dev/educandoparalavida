@@ -10,7 +10,6 @@ const APP_SECRET = process.env.APP_SECRET;
  */
 function validarFirmaMeta(req) {
   if (!APP_SECRET) {
-    // Si no está configurada la firma, permitimos pasar por retrocompatibilidad
     return true;
   }
 
@@ -25,7 +24,7 @@ function validarFirmaMeta(req) {
   }
 
   const signature = signatureParts[1];
-  const payload = req.rawBody; // Buffer obtenido de express.json()
+  const payload = req.rawBody;
 
   const expectedSignature = crypto
     .createHmac('sha256', APP_SECRET)
@@ -37,7 +36,7 @@ function validarFirmaMeta(req) {
 
 /**
  * GET /webhook
- * Endpoint de verificación exigido por Meta for Developers
+ * Endpoint de verificación de Meta
  */
 function verificarWebhook(req, res) {
   const mode = req.query['hub.mode'];
@@ -63,7 +62,6 @@ function verificarWebhook(req, res) {
  */
 async function recibirMensaje(req, res) {
   try {
-    // Validar firma de seguridad si APP_SECRET está presente
     if (APP_SECRET && !validarFirmaMeta(req)) {
       console.warn('⚠️ Intento de acceso no autorizado: firma de webhook no válida.');
       return res.sendStatus(403);
@@ -71,33 +69,39 @@ async function recibirMensaje(req, res) {
 
     const body = req.body;
 
-    // Verificar si es un evento de WhatsApp Cloud API
     if (body.object === 'whatsapp_business_account') {
-      const entry = body.entry && body.entry[0];
-      const changes = entry && entry.changes && entry.changes[0];
-      const value = changes && changes.value;
-      const messages = value && value.messages;
+      const entries = body.entry || [];
+      for (const entry of entries) {
+        const changes = entry.changes || [];
+        for (const change of changes) {
+          const value = change.value;
+          if (value && value.messages && value.messages.length > 0) {
+            for (const msg of value.messages) {
+              const from = msg.from; // Número del remitente
 
-      if (messages && messages.length > 0) {
-        const msg = messages[0];
-        const from = msg.from; // Número del remitente
+              let textoMensaje = '';
 
-        let textoMensaje = '';
+              if (msg.type === 'text') {
+                textoMensaje = msg.text ? msg.text.body : '';
+              } else if (msg.type === 'interactive') {
+                if (msg.interactive.type === 'list_reply') {
+                  textoMensaje = msg.interactive.list_reply.title || msg.interactive.list_reply.id;
+                } else if (msg.interactive.type === 'button_reply') {
+                  textoMensaje = msg.interactive.button_reply.title || msg.interactive.button_reply.id;
+                }
+              }
 
-        if (msg.type === 'text') {
-          textoMensaje = msg.text ? msg.text.body : '';
-        } else if (msg.type === 'interactive') {
-          if (msg.interactive.type === 'list_reply') {
-            textoMensaje = msg.interactive.list_reply.title;
-          } else if (msg.interactive.type === 'button_reply') {
-            textoMensaje = msg.interactive.button_reply.title;
+              console.log(` Mensaje procesado de ${from}: "${textoMensaje}"`);
+
+              // Ejecutar procesamiento del flujo
+              try {
+                await procesarMensaje(from, textoMensaje);
+              } catch (errProc) {
+                console.error(` Error en procesarMensaje para ${from}:`, errProc);
+              }
+            }
           }
         }
-
-        console.log(` Mensaje recibido de ${from}: "${textoMensaje}"`);
-
-        // Await completo para evitar congelamiento de lambda en Vercel
-        await procesarMensaje(from, textoMensaje);
       }
 
       return res.status(200).send('EVENT_RECEIVED');

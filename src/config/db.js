@@ -3,6 +3,20 @@ require('dotenv').config();
 
 let poolConfig = {};
 
+function getIndividualConfig() {
+  return {
+    host: process.env.DB_HOST || '213.136.93.164',
+    port: Number(process.env.DB_PORT) || 3306,
+    user: process.env.DB_USER || 'ki11745159_educandoparalavida1',
+    password: process.env.DB_PASSWORD || '39?KIO1zZqo[ZH5?',
+    database: process.env.DB_NAME || 'ki11745159_educandoparalavida',
+    waitForConnections: true,
+    connectionLimit: 5,
+    queueLimit: 0,
+    connectTimeout: 2500, // 2.5 segundos máximo de espera para no bloquear Vercel Serverless
+  };
+}
+
 if (process.env.DATABASE_URL) {
   try {
     const dbUrl = new URL(process.env.DATABASE_URL);
@@ -13,40 +27,28 @@ if (process.env.DATABASE_URL) {
       password: decodeURIComponent(dbUrl.password),
       database: dbUrl.pathname.replace(/^\//, ''),
       waitForConnections: true,
-      connectionLimit: 10,
+      connectionLimit: 5,
       queueLimit: 0,
+      connectTimeout: 2500,
     };
   } catch (err) {
-    console.error('Error parseando DATABASE_URL, utilizando variables individuales:', err.message);
+    console.error('Error parseando DATABASE_URL:', err.message);
     poolConfig = getIndividualConfig();
   }
 } else {
   poolConfig = getIndividualConfig();
 }
 
-function getIndividualConfig() {
-  return {
-    host: process.env.DB_HOST || '127.0.0.1',
-    port: Number(process.env.DB_PORT) || 3306,
-    user: process.env.DB_USER || 'ki11745159_educandoparalavida1',
-    password: process.env.DB_PASSWORD || '39?KIO1zZqo[ZH5?',
-    database: process.env.DB_NAME || 'ki11745159_educandoparalavida',
-    waitForConnections: true,
-    connectionLimit: 10,
-    queueLimit: 0,
-  };
-}
-
 const pool = mysql.createPool(poolConfig);
 
-// Prueba la conexión a la base de datos
+// Prueba la conexión a la base de datos de forma no bloqueante
 async function testConnection() {
   try {
     const connection = await pool.getConnection();
     console.log(' Conexión exitosa a la base de datos MySQL');
     connection.release();
   } catch (error) {
-    console.warn('⚠️ Nota sobre MySQL:', error.message);
+    console.warn('⚠️ Nota sobre MySQL (Servidor no responde a tiempo, usando fallback):', error.message);
   }
 }
 
