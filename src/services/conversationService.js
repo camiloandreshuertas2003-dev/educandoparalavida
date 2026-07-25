@@ -1,7 +1,7 @@
 const pool = require('../config/db');
 const { enviarMensajeTexto, enviarMensajeLista } = require('./whatsappService');
 
-// Fallback en memoria por si la base de datos remota no responde a tiempo
+// Fallback en memoria por si la base de datos remota tiene alta latencia
 const estadosEnMemoria = new Map();
 
 /**
@@ -11,11 +11,10 @@ async function obtenerTextoBot(clave, textoPorDefecto) {
   try {
     const [rows] = await pool.query('SELECT contenido FROM bot_mensajes WHERE clave = ? AND activo = TRUE', [clave]);
     if (rows && rows.length > 0 && rows[0].contenido) {
-      // Limpiar cualquier emoji existente para mantener tono serio y profesional
       return rows[0].contenido.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}]/gu, '');
     }
   } catch (err) {
-    // Si falla la consulta, se usa el valor predeterminado
+    // Si falla la BD, retorna el texto por defecto
   }
   return textoPorDefecto;
 }
@@ -33,7 +32,6 @@ async function obtenerGradosDinamicos() {
     console.warn('⚠️ No se pudieron cargar los grados desde MySQL, usando lista fallback.');
   }
 
-  // Fallback predeterminado de grados para Colombia
   return [
     { id: 1, nombre: 'Preescolar / Transicion' },
     { id: 2, nombre: 'Primaria (1 a 5)' },
@@ -44,67 +42,66 @@ async function obtenerGradosDinamicos() {
 }
 
 /**
- * Obtener o crear el estado de la conversación
+ * Obtener estado de la conversación con persistencia en MySQL y respaldo en memoria
  */
 async function obtenerEstadoConversacion(telefono) {
   try {
-    const [rows] = await pool.query(
-      'SELECT * FROM conversaciones WHERE telefono = ?',
-      [telefono]
-    );
-
+    const [rows] = await pool.query('SELECT * FROM conversaciones WHERE telefono = ?', [telefono]);
     if (rows && rows.length > 0) {
-      return rows[0];
+      const estadoBD = rows[0];
+      estadosEnMemoria.set(telefono, estadoBD);
+      return estadoBD;
     }
-
-    await pool.query(
-      'INSERT INTO conversaciones (telefono, paso_actual) VALUES (?, ?)',
-      [telefono, 'inicio']
-    );
-
-    return {
-      telefono,
-      paso_actual: 'inicio',
-      nombre_temp: null,
-      apellido_temp: null,
-      telefono_temp: null,
-      programa_temp: null,
-    };
   } catch (error) {
-    if (!estadosEnMemoria.has(telefono)) {
-      estadosEnMemoria.set(telefono, {
-        telefono,
-        paso_actual: 'inicio',
-        nombre_temp: null,
-        apellido_temp: null,
-        telefono_temp: null,
-        programa_temp: null,
-      });
-    }
+    console.warn(`⚠️ Error consultando estado en BD para ${telefono}:`, error.message);
+  }
+
+  if (estadosEnMemoria.has(telefono)) {
     return estadosEnMemoria.get(telefono);
   }
+
+  const nuevoEstado = {
+    telefono,
+    paso_actual: 'inicio',
+    nombre_temp: null,
+    apellido_temp: null,
+    telefono_temp: null,
+    programa_temp: null,
+  };
+  estadosEnMemoria.set(telefono, nuevoEstado);
+  return nuevoEstado;
 }
 
 /**
- * Actualizar el estado de la conversación en la BD (o memoria fallback)
+ * Actualizar atomicamente el estado de la conversación usando UPSERT
  */
 async function actualizarConversacion(telefono, nuevosCampos) {
-  try {
-    const setClause = Object.keys(nuevosCampos)
-      .map((key) => `${key} = ?`)
-      .join(', ');
-    const values = [...Object.values(nuevosCampos), telefono];
-
-    await pool.query(
-      `UPDATE conversaciones SET ${setClause} WHERE telefono = ?`,
-      values
-    );
-  } catch (error) {
-    // Silencioso en fallback
-  }
-
   const actual = estadosEnMemoria.get(telefono) || { telefono, paso_actual: 'inicio' };
-  estadosEnMemoria.set(telefono, { ...actual, ...nuevosCampos });
+  const actualizado = { ...actual, ...nuevosCampos };
+  estadosEnMemoria.set(telefono, actualizado);
+
+  try {
+    const fields = Object.keys(nuevosCampos);
+    if (fields.length === 0) return;
+
+    const setClause = fields.map((f) => `${f} = ?`).join(', ');
+    const updateValues = fields.map((f) => nuevosCampos[f]);
+
+    const insertFields = ['telefono', ...fields].join(', ');
+    const placeholders = ['?', ...fields.map(() => '?')].join(', ');
+    const insertValues = [telefono, ...updateValues];
+
+    const sql = `
+      INSERT INTO conversaciones (${insertFields})
+      VALUES (${placeholders})
+      ON DUPLICATE KEY UPDATE ${setClause}, actualizado_en = NOW()
+    `;
+
+    await pool.query(sql, [...insertValues, ...updateValues]);
+    console.log(` Estado de conversación actualizado en BD para ${telefono}: paso_actual -> "${actualizado.paso_actual}"`);
+  } catch (error) {
+    console.error(` Error actualizando conversación en BD para ${telefono}:`, error.message);
+  }
 }
 
 /**
@@ -128,7 +125,7 @@ async function guardarLead(telefono, nombre, apellido, gradoId, gradoTexto) {
 
     console.log(` Lead registrado exitosamente para ${nombre} ${apellido} (${telefono})`);
   } catch (error) {
-    console.error('⚠️ Error al guardar lead en MySQL:', error.message);
+    console.error(' Error al guardar lead en MySQL:', error.message);
   }
 }
 
@@ -147,10 +144,11 @@ async function registrarLog(telefono, direccion, contenido) {
 }
 
 /**
- * Procesar mensaje entrante del usuario (Máquina de Estados Profesional sin Emojis)
+ * Procesar mensaje entrante del usuario (Flujo Completo de Captación)
  */
 async function procesarMensaje(telefono, mensajeTexto) {
   const textoLimpio = mensajeTexto ? mensajeTexto.trim() : '';
+  console.log(` PROCESANDO FLUIDO DE CONVERSACIÓN para ${telefono}. Mensaje: "${textoLimpio}"`);
   registrarLog(telefono, 'entrante', textoLimpio).catch(() => {});
 
   // Comando global para reiniciar conversación
@@ -171,6 +169,7 @@ async function procesarMensaje(telefono, mensajeTexto) {
   }
 
   const estado = await obtenerEstadoConversacion(telefono);
+  console.log(` PASO ACTUAL DE CONVERSACIÓN para ${telefono}: "${estado.paso_actual}"`);
 
   switch (estado.paso_actual) {
     case 'inicio': {
@@ -191,10 +190,12 @@ async function procesarMensaje(telefono, mensajeTexto) {
         registrarLog(telefono, 'saliente', msg).catch(() => {});
         return;
       }
+
       await actualizarConversacion(telefono, {
         nombre_temp: textoLimpio,
         paso_actual: 'apellido',
       });
+
       const msg = `Gracias, ${textoLimpio}. A continuacion, por favor indique su apellido:`;
       await enviarMensajeTexto(telefono, msg);
       registrarLog(telefono, 'saliente', msg).catch(() => {});
@@ -208,10 +209,12 @@ async function procesarMensaje(telefono, mensajeTexto) {
         registrarLog(telefono, 'saliente', msg).catch(() => {});
         return;
       }
+
       await actualizarConversacion(telefono, {
         apellido_temp: textoLimpio,
         paso_actual: 'telefono',
       });
+
       const msg = 'Perfecto. Indique su numero telefonico de contacto (Escriba "este" si es el mismo numero de WhatsApp):';
       await enviarMensajeTexto(telefono, msg);
       registrarLog(telefono, 'saliente', msg).catch(() => {});
@@ -282,8 +285,8 @@ async function procesarMensaje(telefono, mensajeTexto) {
       const apellidoFinal = estado.apellido_temp || '';
       const telefonoContactoFinal = estado.telefono_temp || telefono;
 
-      // Guardar Lead de forma asíncrona
-      guardarLead(telefonoContactoFinal, nombreFinal, apellidoFinal, gradoId, gradoSeleccionadoText).catch(() => {});
+      // Guardar Lead
+      await guardarLead(telefonoContactoFinal, nombreFinal, apellidoFinal, gradoId, gradoSeleccionadoText);
 
       await actualizarConversacion(telefono, {
         programa_temp: gradoSeleccionadoText,
