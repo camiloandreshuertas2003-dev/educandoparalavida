@@ -189,26 +189,30 @@ async function actualizarConversacion(telefono, nuevosCampos) {
 /**
  * Guardar el Lead final con puntuación de Lead Scoring
  */
-async function guardarLead(telefono, nombre, apellido, gradoId, gradoTexto) {
+async function guardarLead(telefono, nombreCompleto, telefonoContacto, gradoId, gradoTexto) {
   try {
     let puntaje = 30;
-    if (nombre && apellido) puntaje += 20;
+    if (nombreCompleto) puntaje += 20;
+
+    const partes = (nombreCompleto || '').trim().split(/\s+/);
+    const nombre = partes[0] || 'Interesado';
+    const apellido = partes.slice(1).join(' ') || '';
 
     await pool.query(
       `INSERT INTO leads_fase2 (telefono, nombre_contacto, apellido_contacto, grado_interes_id, habeas_data_aceptado, puntaje)
        VALUES (?, ?, ?, ?, TRUE, ?)
        ON DUPLICATE KEY UPDATE nombre_contacto=?, apellido_contacto=?, grado_interes_id=?, puntaje=?, actualizado_en=NOW()`,
-      [telefono, nombre, apellido, gradoId || null, puntaje, nombre, apellido, gradoId || null, puntaje]
+      [telefonoContacto || telefono, nombre, apellido, gradoId || null, puntaje, nombre, apellido, gradoId || null, puntaje]
     );
 
     await pool.query(
       `INSERT INTO leads (telefono, nombre, apellido, programa_interes)
        VALUES (?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE nombre=?, apellido=?, programa_interes=?, fecha_registro=NOW()`,
-      [telefono, nombre, apellido, gradoTexto, nombre, apellido, gradoTexto]
+      [telefonoContacto || telefono, nombre, apellido, gradoTexto, nombre, apellido, gradoTexto]
     );
 
-    console.log(` Lead registrado exitosamente con scoring ${puntaje} para ${nombre} ${apellido} (${telefono})`);
+    console.log(` Lead registrado exitosamente con scoring ${puntaje} para ${nombreCompleto} (${telefonoContacto || telefono})`);
   } catch (error) {
     console.error(' Error al guardar lead en MySQL:', error.message);
   }
@@ -227,7 +231,29 @@ async function registrarLog(telefono, direccion, contenido) {
 }
 
 /**
- * Procesar mensaje entrante con Tolerancia a Mala Ortografía + Menú de Opciones
+ * Enviar cuadro de confirmación con opciones numeradas para corregir o aceptar
+ */
+async function enviarMensajeConfirmacionDatos(telefono, estado) {
+  const nombreComp = estado.nombre_temp || 'No especificado';
+  const telCont = estado.telefono_temp || telefono;
+  const progComp = estado.programa_temp || 'No especificado';
+
+  const msgConfirmacion = ` Verifique sus datos de contacto:\n\n` +
+    `1. Nombre y Apellidos: ${nombreComp}\n` +
+    `2. Telefono de Contacto: ${telCont}\n` +
+    `3. Grado Educativo: ${progComp}\n\n` +
+    `Responda con un numero:\n` +
+    `4. Si los datos son CORRECTOS y desea confirmar.\n` +
+    `1. Si desea corregir su Nombre y Apellidos.\n` +
+    `2. Si desea corregir su Telefono.\n` +
+    `3. Si desea corregir su Grado.`;
+
+  await enviarMensajeTexto(telefono, msgConfirmacion);
+  await registrarLog(telefono, 'saliente', msgConfirmacion);
+}
+
+/**
+ * Procesar mensaje entrante
  */
 async function procesarMensaje(telefono, mensajeTexto) {
   const textoLimpio = mensajeTexto ? mensajeTexto.trim() : '';
@@ -245,7 +271,7 @@ async function procesarMensaje(telefono, mensajeTexto) {
       programa_temp: null,
     });
     
-    const bienvenida = 'Bienvenido al Colegio Virtual Educando para la Vida. Somos una institucion educativa autorizada. Para brindarle informacion sobre matriculas, por favor indique su nombre completo:';
+    const bienvenida = 'Bienvenido al Colegio Virtual Educando para la Vida. Somos una institucion educativa autorizada. Para brindarle informacion sobre matriculas, por favor indique su Nombre Completo (Nombres y Apellidos):';
     await enviarMensajeTexto(telefono, bienvenida);
     registrarLog(telefono, 'saliente', bienvenida).catch(() => {});
     await actualizarConversacion(telefono, { paso_actual: 'nombre' });
@@ -262,10 +288,9 @@ async function procesarMensaje(telefono, mensajeTexto) {
   const respuestaFaq = await buscarEnBaseConocimiento(textoLimpio);
   const estado = await obtenerEstadoConversacion(telefono);
 
-  if (respuestaFaq && estado.paso_actual !== 'inicio' && estado.paso_actual !== 'finalizado') {
+  if (respuestaFaq && estado.paso_actual !== 'inicio' && estado.paso_actual !== 'confirmacion' && estado.paso_actual !== 'finalizado') {
     let msgPregunta = `${respuestaFaq}\n\n`;
-    if (estado.paso_actual === 'nombre') msgPregunta += 'Para continuar con su registro, por favor indique su nombre completo:';
-    else if (estado.paso_actual === 'apellido') msgPregunta += 'Para continuar, por favor indique su apellido:';
+    if (estado.paso_actual === 'nombre') msgPregunta += 'Para continuar con su registro, por favor indique su Nombre Completo (Nombres y Apellidos):';
     else if (estado.paso_actual === 'telefono') msgPregunta += 'Indique su numero telefonico de contacto:';
     else if (estado.paso_actual === 'programa') msgPregunta += 'Indique el grado educativo de su interes:';
 
@@ -278,7 +303,7 @@ async function procesarMensaje(telefono, mensajeTexto) {
     case 'inicio': {
       const bienvenida = await obtenerTextoBot(
         'bienvenida',
-        'Bienvenido al Colegio Virtual Educando para la Vida. Somos una institucion educativa autorizada. Para brindarle informacion personalizada sobre matriculas, por favor indique su nombre completo:'
+        'Bienvenido al Colegio Virtual Educando para la Vida. Somos una institucion educativa autorizada. Para brindarle informacion personalizada sobre matriculas, por favor indique su Nombre Completo (Nombres y Apellidos):'
       );
       await enviarMensajeTexto(telefono, bienvenida);
       registrarLog(telefono, 'saliente', bienvenida).catch(() => {});
@@ -288,7 +313,7 @@ async function procesarMensaje(telefono, mensajeTexto) {
 
     case 'nombre': {
       if (!textoLimpio) {
-        const msg = 'Por favor indique su nombre completo para continuar:';
+        const msg = 'Por favor indique su Nombre Completo (Nombres y Apellidos) para continuar:';
         await enviarMensajeTexto(telefono, msg);
         registrarLog(telefono, 'saliente', msg).catch(() => {});
         return;
@@ -296,29 +321,10 @@ async function procesarMensaje(telefono, mensajeTexto) {
 
       await actualizarConversacion(telefono, {
         nombre_temp: textoLimpio,
-        paso_actual: 'apellido',
-      });
-
-      const msg = `Gracias, ${textoLimpio}. A continuacion, por favor indique su apellido:`;
-      await enviarMensajeTexto(telefono, msg);
-      registrarLog(telefono, 'saliente', msg).catch(() => {});
-      break;
-    }
-
-    case 'apellido': {
-      if (!textoLimpio) {
-        const msg = 'Por favor indique su apellido para continuar:';
-        await enviarMensajeTexto(telefono, msg);
-        registrarLog(telefono, 'saliente', msg).catch(() => {});
-        return;
-      }
-
-      await actualizarConversacion(telefono, {
-        apellido_temp: textoLimpio,
         paso_actual: 'telefono',
       });
 
-      const msg = 'Perfecto. Indique su numero telefonico de contacto (Escriba "este" si es el mismo numero de WhatsApp):';
+      const msg = `Gracias, ${textoLimpio}. Indique su numero telefonico de contacto (Escriba "este" si es el mismo numero de WhatsApp):`;
       await enviarMensajeTexto(telefono, msg);
       registrarLog(telefono, 'saliente', msg).catch(() => {});
       break;
@@ -367,7 +373,6 @@ async function procesarMensaje(telefono, mensajeTexto) {
     case 'programa': {
       const gradosDisponibles = await obtenerGradosDinamicos();
       let gradoSeleccionadoText = textoLimpio;
-      let gradoId = null;
 
       const gradoEncontrado = gradosDisponibles.find(
         (g) => g.nombre.toLowerCase() === textoLimpio.toLowerCase() || `g_${g.id}` === textoLimpio
@@ -375,31 +380,67 @@ async function procesarMensaje(telefono, mensajeTexto) {
 
       if (gradoEncontrado) {
         gradoSeleccionadoText = gradoEncontrado.nombre;
-        gradoId = gradoEncontrado.id;
       } else {
         const idxNum = parseInt(textoLimpio) - 1;
         if (!isNaN(idxNum) && gradosDisponibles[idxNum]) {
           gradoSeleccionadoText = gradosDisponibles[idxNum].nombre;
-          gradoId = gradosDisponibles[idxNum].id;
         }
       }
 
-      const nombreFinal = estado.nombre_temp || 'Interesado';
-      const apellidoFinal = estado.apellido_temp || '';
-      const telefonoContactoFinal = estado.telefono_temp || telefono;
-
-      // Guardar Lead
-      await guardarLead(telefonoContactoFinal, nombreFinal, apellidoFinal, gradoId, gradoSeleccionadoText);
+      const estadoActualizado = {
+        ...estado,
+        programa_temp: gradoSeleccionadoText,
+        paso_actual: 'confirmacion',
+      };
 
       await actualizarConversacion(telefono, {
         programa_temp: gradoSeleccionadoText,
-        paso_actual: 'finalizado',
+        paso_actual: 'confirmacion',
       });
 
-      const confirmacion = `Muchas gracias, ${nombreFinal}. Hemos registrado correctamente su solicitud para el programa: ${gradoSeleccionadoText}. Un asesor academico de admisiones se comunicara con usted a la brevedad.\n\n(Puede escribir REINICIAR en cualquier momento si desea realizar otra consulta).`;
-      
-      await enviarMensajeTexto(telefono, confirmacion);
-      registrarLog(telefono, 'saliente', confirmacion).catch(() => {});
+      // Enviar menú de aceptación / corrección con números
+      await enviarMensajeConfirmacionDatos(telefono, estadoActualizado);
+      break;
+    }
+
+    case 'confirmacion': {
+      // Opciones: 4 = Correcto, 1 = Editar Nombre, 2 = Editar Teléfono, 3 = Editar Grado
+      if (textoNorm === '4' || textoNorm === 'correcto' || textoNorm === 'si' || textoNorm === 'aceptar' || textoNorm === 'ok') {
+        const nombreFinal = estado.nombre_temp || 'Interesado';
+        const telefonoContactoFinal = estado.telefono_temp || telefono;
+        const gradoFinal = estado.programa_temp || 'Sin grado';
+
+        const gradosDisponibles = await obtenerGradosDinamicos();
+        const gradoEncontrado = gradosDisponibles.find((g) => g.nombre.toLowerCase() === gradoFinal.toLowerCase());
+        const gradoId = gradoEncontrado ? gradoEncontrado.id : null;
+
+        // Guardar Lead final en la base de datos
+        await guardarLead(telefonoContactoFinal, nombreFinal, telefonoContactoFinal, gradoId, gradoFinal);
+
+        await actualizarConversacion(telefono, { paso_actual: 'finalizado' });
+
+        const confirmacion = `Muchas gracias, ${nombreFinal}. Hemos registrado correctamente su solicitud para el programa: ${gradoFinal}. Un asesor academico de admisiones se comunicara con usted a la brevedad.\n\n(Puede escribir REINICIAR en cualquier momento si desea realizar otra consulta).`;
+        await enviarMensajeTexto(telefono, confirmacion);
+        registrarLog(telefono, 'saliente', confirmacion).catch(() => {});
+      } else if (textoNorm === '1' || textoNorm === 'nombre') {
+        await actualizarConversacion(telefono, { paso_actual: 'nombre' });
+        const msg = 'Por favor indique su Nombre Completo (Nombres y Apellidos) corregido:';
+        await enviarMensajeTexto(telefono, msg);
+        registrarLog(telefono, 'saliente', msg).catch(() => {});
+      } else if (textoNorm === '2' || textoNorm === 'telefono') {
+        await actualizarConversacion(telefono, { paso_actual: 'telefono' });
+        const msg = 'Por favor indique su numero telefonico de contacto corregido:';
+        await enviarMensajeTexto(telefono, msg);
+        registrarLog(telefono, 'saliente', msg).catch(() => {});
+      } else if (textoNorm === '3' || textoNorm === 'grado') {
+        await actualizarConversacion(telefono, { paso_actual: 'telefono' });
+        const msg = 'Seleccionara nuevamente su grado educativo de interes:';
+        await enviarMensajeTexto(telefono, msg);
+        registrarLog(telefono, 'saliente', msg).catch(() => {});
+      } else {
+        // Opción no reconocida, re-enviar la tarjeta de confirmación
+        await enviarMensajeConfirmacionDatos(telefono, estado);
+      }
       break;
     }
 
