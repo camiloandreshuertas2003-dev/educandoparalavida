@@ -5,23 +5,43 @@ const { enviarMensajeTexto, enviarMensajeLista } = require('./whatsappService');
 const estadosEnMemoria = new Map();
 
 /**
- * Buscar respuestas en la Base de Conocimiento (FAQs) usando coincidencia por palabras clave
+ * Normalizar texto para tolerar mala ortografía, tildes y errores fonéticos comunes
+ */
+function normalizarTexto(str) {
+  if (!str) return '';
+  return str
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // Eliminar tildes y acentos
+    .replace(/[^\w\s]/gi, '')       // Eliminar signos de puntuación
+    .replace(/\bk\b/g, 'que')       // reemplazar 'k' sola por 'que'
+    .replace(/presio|precio|presyo|costo|costos|kual|cual|cuanto|kwanto/g, 'precio')
+    .replace(/vibo|vivo|bibo|clas|clase|clases|en vivo/g, 'vivo')
+    .replace(/titulo|titulos|oficial|valido|men|icfes/g, 'titulo')
+    .replace(/requisit|requisito|requisitos|papeles|documento|documentos/g, 'requisito')
+    .trim();
+}
+
+/**
+ * Buscar respuestas en la Base de Conocimiento (FAQs) tolerando mala ortografía
  */
 async function buscarEnBaseConocimiento(mensajeTexto) {
   if (!mensajeTexto) return null;
-  const texto = mensajeTexto.toLowerCase();
+  const textoNorm = normalizarTexto(mensajeTexto);
 
   try {
     const [faqs] = await pool.query('SELECT pregunta_frecuente, respuesta_aprobada FROM base_conocimiento WHERE activo = TRUE');
     if (faqs && faqs.length > 0) {
       for (const faq of faqs) {
-        const keywords = faq.pregunta_frecuente.toLowerCase().split(/\s+/).filter(w => w.length > 3);
-        const matchCount = keywords.filter(k => texto.includes(k)).length;
-        if (matchCount >= 1 || (texto.includes('precio') && faq.pregunta_frecuente.toLowerCase().includes('precio')) ||
-            (texto.includes('costo') && faq.pregunta_frecuente.toLowerCase().includes('precio')) ||
-            (texto.includes('en vivo') && faq.pregunta_frecuente.toLowerCase().includes('vivo')) ||
-            (texto.includes('titulo') && faq.pregunta_frecuente.toLowerCase().includes('titulo')) ||
-            (texto.includes('oficial') && faq.pregunta_frecuente.toLowerCase().includes('oficial'))) {
+        const pregNorm = normalizarTexto(faq.pregunta_frecuente);
+        const keywords = pregNorm.split(/\s+/).filter(w => w.length > 3);
+        const matchCount = keywords.filter(k => textoNorm.includes(k)).length;
+
+        if (matchCount >= 1 ||
+            (textoNorm.includes('precio') && pregNorm.includes('precio')) ||
+            (textoNorm.includes('vivo') && pregNorm.includes('vivo')) ||
+            (textoNorm.includes('titulo') && pregNorm.includes('titulo')) ||
+            (textoNorm.includes('requisito') && pregNorm.includes('requisito'))) {
           return faq.respuesta_aprobada;
         }
       }
@@ -30,18 +50,49 @@ async function buscarEnBaseConocimiento(mensajeTexto) {
     console.warn('⚠️ Nota consultando Base de Conocimiento:', err.message);
   }
 
-  // Respuestas predeterminadas institucionales
-  if (texto.includes('precio') || texto.includes('costo') || texto.includes('cuanto') || texto.includes('valor')) {
+  // Respuestas predeterminadas institucionales adaptadas a errores fonéticos
+  if (textoNorm.includes('precio')) {
     return 'En el Colegio Virtual Educando para la Vida los costos son muy accesibles. Ofrecemos mensualidades economicas con facilidades de pago. Al registrar sus datos, le enviaremos la tarifa exacta para su grado.';
   }
-  if (texto.includes('clase') || texto.includes('vivo') || texto.includes('grabad')) {
+  if (textoNorm.includes('vivo')) {
     return 'Ofrecemos un modelo flexible 100% virtual con plataforma 24/7, clases en vivo interactivas y tutorias personalizadas para aprender a su propio ritmo.';
   }
-  if (texto.includes('titulo') || texto.includes('valido') || texto.includes('oficial') || texto.includes('icfes')) {
+  if (textoNorm.includes('titulo')) {
     return 'Contamos con resolucion oficial expedida por la Secretaria de Educacion conforme a la Ley 115. El titulo de Bachiller es 100% legal y valido para ingresar a universidades.';
+  }
+  if (textoNorm.includes('requisito')) {
+    return 'Se requiere fotocopia del documento de identidad del estudiante y acudiente, certificado del ultimo ano cursado y recibo de pago de matricula.';
   }
 
   return null;
+}
+
+/**
+ * Despachar menú interactivo de opciones cuando el mensaje no se entiende o se solicita ayuda
+ */
+async function enviarMenuOpcionesFaq(telefono) {
+  const secciones = [
+    {
+      title: 'Consultas Frecuentes',
+      rows: [
+        { id: 'faq_precios', title: 'Precios y Pensiones' },
+        { id: 'faq_clases', title: 'Clases y Metodologia' },
+        { id: 'faq_titulo', title: 'Titulo Oficial MEN' },
+        { id: 'faq_requisitos', title: 'Requisitos de Matricula' },
+        { id: 'faq_horarios', title: 'Horarios de Atencion' },
+      ],
+    },
+  ];
+
+  const header = 'Menu de Ayuda - Colegio Virtual';
+  const body = 'Seleccione la opcion de su interes o indique su nombre completo para continuar el registro:';
+
+  try {
+    await enviarMensajeLista(telefono, body, header, secciones);
+  } catch (e) {
+    const textFallback = `${body}\n\n1. Precios y Pensiones\n2. Clases y Metodologia\n3. Titulo Oficial MEN\n4. Requisitos de Matricula\n5. Horarios de Atencion`;
+    await enviarMensajeTexto(telefono, textFallback);
+  }
 }
 
 /**
@@ -136,11 +187,11 @@ async function actualizarConversacion(telefono, nuevosCampos) {
 }
 
 /**
- * Guardar el Lead final con puntuación automática (Lead Scoring)
+ * Guardar el Lead final con puntuación de Lead Scoring
  */
 async function guardarLead(telefono, nombre, apellido, gradoId, gradoTexto) {
   try {
-    let puntaje = 30; // Base por completar datos
+    let puntaje = 30;
     if (nombre && apellido) puntaje += 20;
 
     await pool.query(
@@ -157,7 +208,7 @@ async function guardarLead(telefono, nombre, apellido, gradoId, gradoTexto) {
       [telefono, nombre, apellido, gradoTexto, nombre, apellido, gradoTexto]
     );
 
-    console.log(` Lead registrado con scoring ${puntaje} para ${nombre} ${apellido} (${telefono})`);
+    console.log(` Lead registrado exitosamente con scoring ${puntaje} para ${nombre} ${apellido} (${telefono})`);
   } catch (error) {
     console.error(' Error al guardar lead en MySQL:', error.message);
   }
@@ -176,15 +227,16 @@ async function registrarLog(telefono, direccion, contenido) {
 }
 
 /**
- * Procesar mensaje entrante con Capa NLU + Flujo Estructurado
+ * Procesar mensaje entrante con Tolerancia a Mala Ortografía + Menú de Opciones
  */
 async function procesarMensaje(telefono, mensajeTexto) {
   const textoLimpio = mensajeTexto ? mensajeTexto.trim() : '';
-  console.log(` PROCESANDO CONVERSACIÓN NLU para ${telefono}: "${textoLimpio}"`);
+  const textoNorm = normalizarTexto(textoLimpio);
+  console.log(` PROCESANDO MENSAJE NLU para ${telefono}: "${textoLimpio}" (norm: "${textoNorm}")`);
   registrarLog(telefono, 'entrante', textoLimpio).catch(() => {});
 
   // Comando global para reiniciar conversación
-  if (textoLimpio.toLowerCase() === 'reiniciar' || textoLimpio.toLowerCase() === 'cancelar' || textoLimpio.toLowerCase() === 'inicio') {
+  if (textoNorm === 'reiniciar' || textoNorm === 'cancelar' || textoNorm === 'inicio' || textoNorm === 'reset') {
     await actualizarConversacion(telefono, {
       paso_actual: 'inicio',
       nombre_temp: null,
@@ -200,7 +252,13 @@ async function procesarMensaje(telefono, mensajeTexto) {
     return;
   }
 
-  // Comprobar si el mensaje es una pregunta libre a la Base de Conocimiento
+  // Solicitud explícita de menú o ayuda
+  if (textoNorm === 'menu' || textoNorm === 'ayuda' || textoNorm === 'opciones') {
+    await enviarMenuOpcionesFaq(telefono);
+    return;
+  }
+
+  // Comprobar si el mensaje es una pregunta libre tolerando mala ortografía
   const respuestaFaq = await buscarEnBaseConocimiento(textoLimpio);
   const estado = await obtenerEstadoConversacion(telefono);
 
@@ -268,7 +326,7 @@ async function procesarMensaje(telefono, mensajeTexto) {
 
     case 'telefono': {
       let numContacto = textoLimpio;
-      if (textoLimpio.toLowerCase() === 'este' || textoLimpio.toLowerCase() === 'el mismo') {
+      if (textoNorm === 'este' || textoNorm === 'el mismo') {
         numContacto = telefono;
       }
 
@@ -350,9 +408,7 @@ async function procesarMensaje(telefono, mensajeTexto) {
         await enviarMensajeTexto(telefono, respuestaFaq);
         registrarLog(telefono, 'saliente', respuestaFaq).catch(() => {});
       } else {
-        const msg = `Bienvenido nuevamente. Su solicitud previa ya fue registrada. Si desea reiniciar el formulario para ingresar otra informacion, escriba REINICIAR.`;
-        await enviarMensajeTexto(telefono, msg);
-        registrarLog(telefono, 'saliente', msg).catch(() => {});
+        await enviarMenuOpcionesFaq(telefono);
       }
       break;
     }

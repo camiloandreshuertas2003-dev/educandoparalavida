@@ -152,13 +152,19 @@
     }
 
     /* Cards & Stats */
-    .card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px; margin-bottom: 32px; }
+    .card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px; margin-bottom: 24px; }
     .stat-card {
       background: var(--color-surface); border: 1px solid var(--color-border);
       border-radius: var(--radius-md); padding: 24px; box-shadow: var(--shadow-sm);
     }
     .stat-label { font-size: 0.8rem; color: var(--color-muted); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
     .stat-value { font-size: 2rem; font-weight: 700; margin-top: 8px; color: var(--color-ink); }
+
+    .info-box {
+      background: rgba(44, 74, 110, 0.06); border: 1px solid rgba(44, 74, 110, 0.15);
+      border-radius: var(--radius-md); padding: 16px; margin-bottom: 28px;
+      font-size: 0.88rem; color: var(--color-ink); line-height: 1.5;
+    }
 
     /* Tables */
     .table-container {
@@ -244,6 +250,7 @@
     <symbol id="icon-plus" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></symbol>
     <symbol id="icon-phone" viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></symbol>
     <symbol id="icon-star" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></symbol>
+    <symbol id="icon-lock" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></symbol>
   </svg>
 
   <!-- Login View -->
@@ -340,6 +347,13 @@
             <div class="stat-label">Conversaciones WhatsApp</div>
             <div class="stat-value" id="stat-conversaciones" style="color: var(--color-success);">0</div>
           </div>
+        </div>
+
+        <div class="info-box">
+          <strong>ℹ️ Sistema de Puntuación de Leads (Lead Scoring):</strong>
+          <p style="margin-top:4px;">
+            El valor de <strong>Puntuación (pts)</strong> asigna prioridad automática a cada prospecto según el nivel de completitud de sus datos (Nombre, Apellido y Grado de Interés seleccionado). Los prospectos con mayor puntuación (30 a 50 pts) son altamente calificados para matricularse de inmediato.
+          </p>
         </div>
 
         <div class="table-container">
@@ -515,6 +529,17 @@
       showApp();
     }
 
+    // Validación de seguridad para borrado (PIN 123)
+    function solicitarPinProteccion() {
+      const pin = prompt('🔒 PROTECCIÓN DE SEGURIDAD: Ingrese la clave secreta (123) para confirmar la eliminación:');
+      if (pin === '123') {
+        return true;
+      } else {
+        alert('❌ Clave de seguridad incorrecta. Operación de eliminación cancelada.');
+        return false;
+      }
+    }
+
     document.getElementById('login-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const correo = document.getElementById('login-email').value;
@@ -680,7 +705,7 @@
     }
 
     async function eliminarLead(id) {
-      if (confirm('¿Está seguro de eliminar este prospecto?')) {
+      if (solicitarPinProteccion()) {
         await apiFetch(`/api/admin/leads/${id}`, { method: 'DELETE' });
         fetchLeads();
         fetchKanban();
@@ -773,7 +798,7 @@
     }
 
     async function eliminarFaq(id) {
-      if (confirm('¿Está seguro de eliminar esta pregunta frecuente?')) {
+      if (solicitarPinProteccion()) {
         await apiFetch(`/api/admin/base-conocimiento/${id}`, { method: 'DELETE' });
         fetchFaqs();
       }
@@ -852,7 +877,7 @@
     }
 
     async function eliminarGrado(id) {
-      if (confirm('¿Está seguro de eliminar este grado?')) {
+      if (solicitarPinProteccion()) {
         await apiFetch(`/api/admin/grados/${id}`, { method: 'DELETE' });
         fetchGrados();
       }
@@ -943,7 +968,7 @@
     }
 
     async function eliminarBotMsg(id) {
-      if (confirm('¿Está seguro de eliminar este texto del bot?')) {
+      if (solicitarPinProteccion()) {
         await apiFetch(`/api/admin/bot-mensajes/${id}`, { method: 'DELETE' });
         fetchBot();
       }
