@@ -9,6 +9,7 @@ let currentQrDataUri = null;
 let clientStatus = 'disconnected'; // 'disconnected', 'qr_ready', 'authenticated', 'ready'
 let userProfile = null;
 const processedMsgIds = new Set();
+const contactJidMap = new Map();
 
 function initWhatsAppWeb() {
   if (client) {
@@ -75,10 +76,14 @@ function initWhatsAppWeb() {
 
     try {
       const info = client.info;
+      const cleanMyPhone = info.wid ? info.wid.user : '';
       userProfile = {
         name: info.pushname || 'Colegio Educando para la Vida',
-        phone: info.wid ? info.wid.user : ''
+        phone: cleanMyPhone
       };
+      if (cleanMyPhone && info.wid._serialized) {
+        contactJidMap.set(cleanMyPhone, info.wid._serialized);
+      }
       console.log(`📱 Sesión iniciada como: ${userProfile.name} (+${userProfile.phone})`);
     } catch (e) {}
   });
@@ -99,24 +104,44 @@ function initWhatsAppWeb() {
     processedMsgIds.add(msg.id.id);
     if (processedMsgIds.size > 1000) processedMsgIds.clear();
 
-    // Solo procesar chats individuales (@c.us), nunca grupos (@g.us)
-    if (!msg.from.endsWith('@c.us') && !(msg.to && msg.to.endsWith('@c.us'))) {
+    // Solo procesar chats individuales (@c.us o @lid), nunca grupos (@g.us)
+    const isIndividual = (msg.from && (msg.from.endsWith('@c.us') || msg.from.endsWith('@lid'))) ||
+                         (msg.to && (msg.to.endsWith('@c.us') || msg.to.endsWith('@lid')));
+    if (!isIndividual) {
       return;
     }
 
     const texto = msg.body ? msg.body.trim() : '';
     if (!texto) return;
 
-    // Obtener número del remitente
-    let fromNumber = msg.from.replace('@c.us', '').replace(/[^\d]/g, '');
+    let targetJid = msg.from;
+    let fromNumber = msg.from.replace('@c.us', '').replace('@lid', '').replace(/[^\d]/g, '');
 
-    // Si el mensaje es enviado desde el propio celular (Self-Test), procesarlo igual
+    // Intentar resolver el número de teléfono real del contacto desde WhatsApp
+    try {
+      const contact = await msg.getContact();
+      if (contact && contact.number) {
+        fromNumber = contact.number.replace(/[^\d]/g, '');
+      }
+    } catch (e) {}
+
+    // Si el mensaje es enviado desde el propio celular (Self-Test)
     if (msg.fromMe) {
-      // Si te escribes a ti mismo en WhatsApp
-      if (msg.to && msg.to.endsWith('@c.us')) {
-        fromNumber = msg.to.replace('@c.us', '').replace(/[^\d]/g, '');
+      if (msg.to) {
+        targetJid = msg.to;
+        fromNumber = msg.to.replace('@c.us', '').replace('@lid', '').replace(/[^\d]/g, '');
+        try {
+          const toContact = await client.getContactById(msg.to);
+          if (toContact && toContact.number) {
+            fromNumber = toContact.number.replace(/[^\d]/g, '');
+          }
+        } catch (e) {}
       }
     }
+
+    // Mapear el número formateado con su JID real para respuesta garantizada
+    contactJidMap.set(fromNumber, targetJid);
+    contactJidMap.set(msg.from, targetJid);
 
     console.log(`📩 [WhatsApp Web] Mensaje recibido de ${fromNumber}: "${texto}"`);
 
@@ -157,14 +182,22 @@ async function enviarMensajeWWeb(to, texto) {
     throw new Error('WhatsApp Web no está conectado');
   }
 
-  let formattedTo = to.replace(/[^\d]/g, '');
-  if (!formattedTo.endsWith('@c.us')) {
-    formattedTo = `${formattedTo}@c.us`;
-  }
+  const cleanTo = to.replace(/[^\d]/g, '');
+  let targetJid = contactJidMap.get(cleanTo) || contactJidMap.get(to) || `${cleanTo}@c.us`;
 
-  const res = await client.sendMessage(formattedTo, texto);
-  console.log(`📤 [WhatsApp Web] Mensaje enviado a ${to}`);
-  return res;
+  try {
+    const res = await client.sendMessage(targetJid, texto);
+    console.log(`📤 [WhatsApp Web] Mensaje enviado exitosamente a ${to}`);
+    return res;
+  } catch (err) {
+    if (targetJid !== `${cleanTo}@c.us`) {
+      const fallbackJid = `${cleanTo}@c.us`;
+      const res = await client.sendMessage(fallbackJid, texto);
+      console.log(`📤 [WhatsApp Web Fallback] Mensaje enviado exitosamente a ${to}`);
+      return res;
+    }
+    throw err;
+  }
 }
 
 module.exports = {

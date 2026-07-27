@@ -1,6 +1,6 @@
-node_modules/
+node_modules
 .env
+.wwebjs_auth
+.wwebjs_cache
 *.log
-.DS_Store
-
-.vercel
+educandoparalavida.zip
