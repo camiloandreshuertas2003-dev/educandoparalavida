@@ -9,6 +9,7 @@ let currentQrDataUri = null;
 let clientStatus = 'disconnected'; // 'disconnected', 'qr_ready', 'authenticated', 'ready'
 let userProfile = null;
 const processedMsgIds = new Set();
+const botSentMsgIds = new Set();
 const contactJidMap = new Map();
 
 function initWhatsAppWeb() {
@@ -95,18 +96,22 @@ function initWhatsAppWeb() {
     currentQrDataUri = null;
   });
 
-  // Manejar mensajes entrantes (soporta tanto message como message_create)
+  // Manejar únicamente mensajes entrantes de CLIENTES (Ignorar mensajes propios del Bot)
   async function manejarMensaje(msg) {
     if (!msg || !msg.from || !msg.id || !msg.id.id) return;
+
+    // IGNORED CRÍTICO: Nunca procesar mensajes propios (fromMe) ni emitidos por el propio bot
+    if (msg.fromMe || botSentMsgIds.has(msg.id.id)) {
+      return;
+    }
     
     // Evitar procesar el mismo mensaje dos veces
     if (processedMsgIds.has(msg.id.id)) return;
     processedMsgIds.add(msg.id.id);
     if (processedMsgIds.size > 1000) processedMsgIds.clear();
 
-    // Solo procesar chats individuales (@c.us o @lid), nunca grupos (@g.us)
-    const isIndividual = (msg.from && (msg.from.endsWith('@c.us') || msg.from.endsWith('@lid'))) ||
-                         (msg.to && (msg.to.endsWith('@c.us') || msg.to.endsWith('@lid')));
+    // Solo procesar chats individuales (@c.us o @lid), NUNCA grupos (@g.us)
+    const isIndividual = (msg.from && (msg.from.endsWith('@c.us') || msg.from.endsWith('@lid')));
     if (!isIndividual) {
       return;
     }
@@ -125,25 +130,11 @@ function initWhatsAppWeb() {
       }
     } catch (e) {}
 
-    // Si el mensaje es enviado desde el propio celular (Self-Test)
-    if (msg.fromMe) {
-      if (msg.to) {
-        targetJid = msg.to;
-        fromNumber = msg.to.replace('@c.us', '').replace('@lid', '').replace(/[^\d]/g, '');
-        try {
-          const toContact = await client.getContactById(msg.to);
-          if (toContact && toContact.number) {
-            fromNumber = toContact.number.replace(/[^\d]/g, '');
-          }
-        } catch (e) {}
-      }
-    }
-
     // Mapear el número formateado con su JID real para respuesta garantizada
     contactJidMap.set(fromNumber, targetJid);
     contactJidMap.set(msg.from, targetJid);
 
-    console.log(`📩 [WhatsApp Web] Mensaje recibido de ${fromNumber}: "${texto}"`);
+    console.log(`📩 [WhatsApp Web] Mensaje entrante de cliente ${fromNumber}: "${texto}"`);
 
     const { procesarMensaje } = require('./conversationService');
     try {
@@ -153,8 +144,8 @@ function initWhatsAppWeb() {
     }
   }
 
+  // Usar unicamente 'message' para ignorar eventos de creacion propia
   client.on('message', manejarMensaje);
-  client.on('message_create', manejarMensaje);
 
   client.initialize().catch((err) => {
     console.error('❌ Error inicializando Puppeteer para WhatsApp Web:', err.message);
@@ -187,12 +178,19 @@ async function enviarMensajeWWeb(to, texto) {
 
   try {
     const res = await client.sendMessage(targetJid, texto);
+    if (res && res.id && res.id.id) {
+      botSentMsgIds.add(res.id.id);
+      if (botSentMsgIds.size > 2000) botSentMsgIds.clear();
+    }
     console.log(`📤 [WhatsApp Web] Mensaje enviado exitosamente a ${to}`);
     return res;
   } catch (err) {
     if (targetJid !== `${cleanTo}@c.us`) {
       const fallbackJid = `${cleanTo}@c.us`;
       const res = await client.sendMessage(fallbackJid, texto);
+      if (res && res.id && res.id.id) {
+        botSentMsgIds.add(res.id.id);
+      }
       console.log(`📤 [WhatsApp Web Fallback] Mensaje enviado exitosamente a ${to}`);
       return res;
     }
