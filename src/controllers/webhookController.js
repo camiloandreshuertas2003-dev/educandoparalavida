@@ -15,7 +15,7 @@ function validarFirmaMeta(req) {
 
   const signatureHeader = req.headers['x-hub-signature-256'];
   if (!signatureHeader) {
-    return true; // En modo desarrollo/pruebas, no rechazar si no trae header
+    return true;
   }
 
   try {
@@ -57,7 +57,6 @@ function verificarWebhook(req, res) {
     }
   }
 
-  // Si se abre directamente en el navegador sin parámetros de Meta, responder 200 OK con estado informativo
   return res.status(200).json({
     status: 'online',
     endpoint: 'WhatsApp Webhook Endpoint',
@@ -71,9 +70,6 @@ function verificarWebhook(req, res) {
  * Endpoint que recibe notificaciones de mensajes desde WhatsApp Cloud API
  */
 async function recibirMensaje(req, res) {
-  // Responder de inmediato a Meta 200 OK para evitar reintentos o errores de timeout
-  res.status(200).send('EVENT_RECEIVED');
-
   try {
     let body = req.body;
     if (typeof body === 'string') {
@@ -83,7 +79,7 @@ async function recibirMensaje(req, res) {
     }
 
     if (!body || typeof body !== 'object') {
-      return;
+      return res.status(200).send('EVENT_RECEIVED');
     }
 
     console.log(' Webhook Payload Recibido:', JSON.stringify(body));
@@ -113,18 +109,22 @@ async function recibirMensaje(req, res) {
 
             console.log(` PROCESANDO MENSAJE ENTRANTE de ${from}: "${textoMensaje}"`);
 
-            // Ejecutar procesamiento de conversación asíncrono
+            // IMPORTANTE: En Vercel Serverless se DEBE esperar el procesamiento ANTES de enviar res.send()
+            // De lo contrario Vercel congela el proceso Serverless antes de que se envíe la respuesta por WhatsApp
             try {
               await procesarMensaje(from, textoMensaje);
             } catch (errProc) {
-              console.error(` Error crítico en procesarMensaje para ${from}:`, errProc);
+              console.error(` Error en procesarMensaje para ${from}:`, errProc);
             }
           }
         }
       }
     }
+
+    return res.status(200).send('EVENT_RECEIVED');
   } catch (error) {
     console.error(' Error en procesamiento interno de POST /webhook:', error);
+    return res.status(200).send('EVENT_RECEIVED');
   }
 }
 
