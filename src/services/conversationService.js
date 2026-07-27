@@ -272,7 +272,7 @@ async function procesarMensaje(telefono, mensajeTexto) {
       programa_temp: null,
     });
     
-    const bienvenida = '👋 ¡Hola! Bienvenido al Colegio Virtual Educando para la Vida 🎓✨. Somos una institución educativa 100% autorizada 📚. Para brindarle información personalizada sobre matrículas, por favor indique su *Nombre Completo* (Nombres y Apellidos) ✍️:';
+    const bienvenida = '👋 ¡Hola! Bienvenido al Colegio Virtual Educando para la Vida 矿✨. Somos una institución educativa 100% autorizada 📚. Para brindarle información personalizada sobre matrículas, por favor indique su *Nombre Completo* (Nombres y Apellidos) ✍️:';
     await enviarMensajeTexto(telefono, bienvenida);
     registrarLog(telefono, 'saliente', bienvenida).catch(() => {});
     await actualizarConversacion(telefono, { paso_actual: 'nombre' });
@@ -406,7 +406,7 @@ async function procesarMensaje(telefono, mensajeTexto) {
 
     case 'confirmacion': {
       // Opciones: 4 = Correcto, 1 = Editar Nombre, 2 = Editar Teléfono, 3 = Editar Grado
-      if (textoNorm === '4' || textoNorm === 'correcto' || textoNorm === 'si' || textoNorm === 'aceptar' || textoNorm === 'ok') {
+      if (textoNorm === '4' || textoNorm === 'correcto' || textoNorm === 'si' || textoNorm === 'aceptar' || textoNorm === 'ok' || textoNorm === 'confirmar') {
         const nombreFinal = estado.nombre_temp || 'Interesado';
         const telefonoContactoFinal = estado.telefono_temp || telefono;
         const gradoFinal = estado.programa_temp || 'Sin grado';
@@ -428,16 +428,35 @@ async function procesarMensaje(telefono, mensajeTexto) {
         const msg = '✍️ Por favor indique su *Nombre Completo* (Nombres y Apellidos) corregido:';
         await enviarMensajeTexto(telefono, msg);
         registrarLog(telefono, 'saliente', msg).catch(() => {});
-      } else if (textoNorm === '2' || textoNorm === 'telefono') {
+      } else if (textoNorm === '2' || textoNorm === 'telefono' || textoNorm === 'celular') {
         await actualizarConversacion(telefono, { paso_actual: 'telefono' });
         const msg = '📲 Por favor indique su número telefónico de contacto corregido:';
         await enviarMensajeTexto(telefono, msg);
         registrarLog(telefono, 'saliente', msg).catch(() => {});
-      } else if (textoNorm === '3' || textoNorm === 'grado') {
-        await actualizarConversacion(telefono, { paso_actual: 'telefono' });
-        const msg = '🎓 Seleccionará nuevamente su grado educativo de interés:';
-        await enviarMensajeTexto(telefono, msg);
-        registrarLog(telefono, 'saliente', msg).catch(() => {});
+      } else if (textoNorm === '3' || textoNorm === 'grado' || textoNorm === 'programa') {
+        await actualizarConversacion(telefono, { paso_actual: 'programa' });
+        const gradosDisponibles = await obtenerGradosDinamicos();
+        const secciones = [
+          {
+            title: 'Grados Disponibles 📚',
+            rows: gradosDisponibles.map((g) => ({
+              id: `g_${g.id}`,
+              title: g.nombre,
+            })),
+          },
+        ];
+        const mensajeHeader = 'Re-selección de Grado 🎓';
+        const mensajeBody = 'Por favor indique en cuál grado se encuentra interesado/a 👇:';
+        try {
+          await enviarMensajeLista(telefono, mensajeBody, mensajeHeader, secciones);
+        } catch (err) {
+          let fallbackMsg = `${mensajeBody}\n\n`;
+          gradosDisponibles.forEach((g, idx) => {
+            fallbackMsg += `${idx + 1}. ${g.nombre}\n`;
+          });
+          await enviarMensajeTexto(telefono, fallbackMsg);
+        }
+        registrarLog(telefono, 'saliente', mensajeBody).catch(() => {});
       } else {
         // Opción no reconocida, re-enviar la tarjeta de confirmación
         await enviarMensajeConfirmacionDatos(telefono, estado);
