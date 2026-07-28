@@ -149,30 +149,21 @@ async function initWhatsAppWeb() {
       }
     });
 
-    // Escuchar únicamente notificaciones en vivo de mensajes entrantes de clientes
+    // Escuchar mensajes entrantes de clientes
     sock.ev.on('messages.upsert', async (m) => {
-      if (!m || m.type !== 'notify' || !m.messages || m.messages.length === 0) return;
+      if (!m || !m.messages || m.messages.length === 0) return;
 
       for (const msg of m.messages) {
         if (!msg.message) continue;
         if (msg.key.fromMe) continue;
 
+        const remoteJid = msg.key.remoteJid;
+        if (!remoteJid || remoteJid.includes('@g.us')) continue; // Ignorar grupos
+
         const msgId = msg.key.id;
         if (msgId && (processedMsgIds.has(msgId) || botSentMsgIds.has(msgId))) {
           continue;
         }
-        if (msgId) {
-          processedMsgIds.add(msgId);
-          if (processedMsgIds.size > 2000) {
-            const first = processedMsgIds.values().next().value;
-            processedMsgIds.delete(first);
-          }
-        }
-
-        const remoteJid = msg.key.remoteJid;
-        if (!remoteJid || remoteJid.includes('@g.us')) continue; // Ignorar grupos
-
-        const fromNumber = normalizarTelefonoCliente(msg);
 
         const textContent =
           msg.message.conversation ||
@@ -184,7 +175,17 @@ async function initWhatsAppWeb() {
         const textoLimpio = textContent.trim();
         if (!textoLimpio) continue;
 
-        console.log(`📩 [WhatsApp Web Baileys] Mensaje en vivo de ${fromNumber}: "${textoLimpio}"`);
+        // Marcar msgId como procesado ÚNICAMENTE si contiene texto válido de cliente
+        if (msgId) {
+          processedMsgIds.add(msgId);
+          if (processedMsgIds.size > 2000) {
+            const first = processedMsgIds.values().next().value;
+            processedMsgIds.delete(first);
+          }
+        }
+
+        const fromNumber = normalizarTelefonoCliente(msg);
+        console.log(`📩 [WhatsApp Web Baileys] Mensaje entrante de ${fromNumber} (${msgId}): "${textoLimpio}"`);
 
         const { procesarMensaje } = require('./conversationService');
         try {
