@@ -5,7 +5,7 @@ const { enviarMensajeWWeb } = require('./whatsappWebService');
 const estadosEnMemoria = new Map();
 
 /**
- * Normalizar texto para tolerar tildes, mayúsculas y caracteres especiales
+ * Normalizar texto para tolerar tildes, mayúsculas, errores ortográficos y caracteres especiales
  */
 function normalizarTexto(str) {
   if (!str) return '';
@@ -14,10 +14,11 @@ function normalizarTexto(str) {
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^\w\s]/gi, '')
-    .replace(/presio|precio|presyo|costo|costos|kual|cual|cuanto|kwanto/g, 'precio')
-    .replace(/vibo|vivo|bibo|clas|clase|clases|en vivo/g, 'vivo')
-    .replace(/titulo|titulos|oficial|valido|men|icfes/g, 'titulo')
-    .replace(/requisit|requisito|requisitos|papeles|documento|documentos/g, 'requisito')
+    .replace(/presio|precio|presyo|costo|costos|kual|cual|cuanto|kwanto|cuanto vale|valor|mensualidad|pago|tarifas/g, 'precio')
+    .replace(/vibo|vivo|bibo|clas|clase|clases|en vivo|horario|horarios|jornada|tiempo/g, 'vivo')
+    .replace(/titulo|titulos|oficial|valido|men|icfes|secretaria|resolucion|diploma|graduado/g, 'titulo')
+    .replace(/requisit|requisito|requisitos|papeles|documento|documentos|matricula|inscripcion/g, 'requisito')
+    .replace(/donde|ubicacion|direccion|sede|sedes|ciudad|pais/g, 'ubicacion')
     .trim();
 }
 
@@ -46,7 +47,7 @@ async function obtenerTextoBot(clave, fallbackDefault) {
 }
 
 /**
- * Buscar respuestas dinámicas en la tabla `base_conocimiento` (FAQs) en MySQL
+ * Buscar respuestas dinámicas NLU en la tabla `base_conocimiento` (FAQs) de MySQL
  */
 async function buscarEnBaseConocimiento(mensajeTexto) {
   if (!mensajeTexto) return null;
@@ -61,10 +62,10 @@ async function buscarEnBaseConocimiento(mensajeTexto) {
         const matchCount = keywords.filter(k => textoNorm.includes(k)).length;
 
         if (matchCount >= 1 ||
-            (textoNorm.includes('precio') && pregNorm.includes('precio')) ||
-            (textoNorm.includes('vivo') && pregNorm.includes('vivo')) ||
-            (textoNorm.includes('titulo') && pregNorm.includes('titulo')) ||
-            (textoNorm.includes('requisito') && pregNorm.includes('requisito'))) {
+            (textoNorm.includes('precio') && (pregNorm.includes('precio') || pregNorm.includes('costo'))) ||
+            (textoNorm.includes('vivo') && (pregNorm.includes('vivo') || pregNorm.includes('clase') || pregNorm.includes('horario'))) ||
+            (textoNorm.includes('titulo') && (pregNorm.includes('titulo') || pregNorm.includes('oficial') || pregNorm.includes('valido'))) ||
+            (textoNorm.includes('requisito') && (pregNorm.includes('requisito') || pregNorm.includes('documento')))) {
           return faq.respuesta_aprobada;
         }
       }
@@ -73,6 +74,7 @@ async function buscarEnBaseConocimiento(mensajeTexto) {
     console.warn('⚠️ Nota consultando Base de Conocimiento en MySQL:', err.message);
   }
 
+  // Respuestas predeterminadas institucionales si la BD se encuentra en inicialización
   if (textoNorm.includes('precio')) {
     return '💡 En el Colegio Virtual Educando para la Vida 🎓 los costos son muy accesibles. Ofrecemos mensualidades económicas con facilidades de pago 💸. Al registrar sus datos, le enviaremos la tarifa exacta para su grado 📚.';
   }
@@ -257,7 +259,7 @@ async function resetearConversacionLimpia(sessionId) {
 }
 
 /**
- * Procesar mensaje NLU directo sin paso de recuento: Nombre -> Teléfono -> Grado -> Guardado Automático
+ * Procesar mensaje NLU inteligente conectado a la Base de Conocimiento y Maquina de Estados de MySQL
  */
 async function procesarMensaje(sessionId, mensajeTexto) {
   const textoLimpio = mensajeTexto ? mensajeTexto.trim() : '';
@@ -265,7 +267,7 @@ async function procesarMensaje(sessionId, mensajeTexto) {
   console.log(` PROCESANDO MENSAJE NLU para ${sessionId}: "${textoLimpio}" (norm: "${textoNorm}")`);
   await registrarLog(sessionId, 'entrante', textoLimpio);
 
-  // Comando de reinicio limpio
+  // Comando de reinicio limpio en cualquier momento
   if (textoNorm === 'reiniciar' || textoNorm === 'cancelar' || textoNorm === 'inicio' || textoNorm === 'reset' || textoNorm === 'limpiar') {
     await resetearConversacionLimpia(sessionId);
     return;
@@ -287,7 +289,7 @@ async function procesarMensaje(sessionId, mensajeTexto) {
         return;
       }
 
-      // Responder FAQ si aplica
+      // Responder FAQ desde MySQL si el cliente hace una pregunta antes de dar su nombre
       const respuestaFaq = await buscarEnBaseConocimiento(textoLimpio);
       if (respuestaFaq) {
         const msgFaq = `${respuestaFaq}\n\n✍️ Para continuar con su registro, por favor indique su *Nombre Completo* (Nombres y Apellidos):`;
@@ -316,7 +318,7 @@ async function procesarMensaje(sessionId, mensajeTexto) {
         return;
       }
 
-      // Responder FAQ si aplica
+      // Responder FAQ desde MySQL si el cliente hace una pregunta antes de dar su número
       const respuestaFaq = await buscarEnBaseConocimiento(textoLimpio);
       if (respuestaFaq) {
         const msgFaq = `${respuestaFaq}\n\n📱 Para continuar, por favor escriba su *Número de Teléfono / Celular de Contacto* (Ejemplo: 3218423914):`;
@@ -325,7 +327,7 @@ async function procesarMensaje(sessionId, mensajeTexto) {
         return;
       }
 
-      // Guardar el número ingresado manualmente y enviar el menú de Grados
+      // Guardar el número ingresado manualmente y enviar el menú de Grados de MySQL
       estado = await actualizarConversacion(sessionId, {
         telefono_temp: textoLimpio,
         paso_actual: 'programa'
@@ -377,7 +379,7 @@ async function procesarMensaje(sessionId, mensajeTexto) {
           console.error('Error guardando lead:', e.message);
         }
 
-        // C. Enviar mensaje final de agradecimiento e inscripción oficial
+        // C. Enviar mensaje final de agradecimiento e inscripción oficial desde MySQL
         const confirmacionBase = await obtenerTextoBot(
           'despedida',
           `🎉 ¡Muchas gracias, ${nombreFinal}! ✨ Hemos registrado exitosamente su inscripción para el programa: *${gradoFinal}* 🎓. Un asesor académico de admisiones se comunicará con usted al teléfono *${telManualFinal}* 📲.`
@@ -389,7 +391,7 @@ async function procesarMensaje(sessionId, mensajeTexto) {
         return;
       }
 
-      // 4. Pregunta de FAQ
+      // 4. Responder FAQ si el cliente hace una pregunta sobre costos, validez, etc.
       const respuestaFaq = await buscarEnBaseConocimiento(textoLimpio);
       if (respuestaFaq) {
         await enviarTexto(sessionId, respuestaFaq);
@@ -407,6 +409,7 @@ async function procesarMensaje(sessionId, mensajeTexto) {
     }
 
     case 'finalizado': {
+      // Si el cliente ya terminó su registro pero hace cualquier pregunta de FAQ
       const respuestaFaq = await buscarEnBaseConocimiento(textoLimpio);
       if (respuestaFaq) {
         await enviarTexto(sessionId, respuestaFaq);
