@@ -1,7 +1,7 @@
 const pool = require('../config/db');
 const { enviarMensajeWWeb } = require('./whatsappWebService');
 
-// Memoria de respaldo para sincronizar estados si la base de datos MySQL está en reconexión
+// Memoria de respaldo para sincronizar estados si MySQL se reconecta
 const estadosEnMemoria = new Map();
 
 /**
@@ -24,11 +24,11 @@ function normalizarTexto(str) {
 /**
  * Helper para enviar mensajes de texto a través del motor de WhatsApp activo
  */
-async function enviarTexto(telefono, mensaje) {
+async function enviarTexto(sessionId, mensaje) {
   try {
-    await enviarMensajeWWeb(telefono, mensaje);
+    await enviarMensajeWWeb(sessionId, mensaje);
   } catch (err) {
-    console.error(`❌ Error enviando mensaje de WhatsApp a ${telefono}:`, err.message);
+    console.error(`❌ Error enviando mensaje de WhatsApp a ${sessionId}:`, err.message);
   }
 }
 
@@ -73,7 +73,6 @@ async function buscarEnBaseConocimiento(mensajeTexto) {
     console.warn('⚠️ Nota consultando Base de Conocimiento en MySQL:', err.message);
   }
 
-  // Respuestas predeterminadas si la BD está en inicialización
   if (textoNorm.includes('precio')) {
     return '💡 En el Colegio Virtual Educando para la Vida 🎓 los costos son muy accesibles. Ofrecemos mensualidades económicas con facilidades de pago 💸. Al registrar sus datos, le enviaremos la tarifa exacta para su grado 📚.';
   }
@@ -113,7 +112,7 @@ async function obtenerGradosDinamicos() {
 /**
  * Enviar lista de oferta académica de grados desde MySQL
  */
-async function enviarListaGrados(telefono) {
+async function enviarListaGrados(sessionId) {
   const grados = await obtenerGradosDinamicos();
   let msg = '🎓 Seleccione el *Grado Educativo* de su interés enviando el número correspondiente 👇:\n\n';
   grados.forEach((g, idx) => {
@@ -121,46 +120,46 @@ async function enviarListaGrados(telefono) {
   });
   msg += '\n👉 *Responda únicamente con el número de su opción (Ejemplo: 2)*';
 
-  await enviarTexto(telefono, msg);
-  await registrarLog(telefono, 'saliente', msg);
+  await enviarTexto(sessionId, msg);
+  await registrarLog(sessionId, 'saliente', msg);
 }
 
 /**
- * Obtener estado de la conversación desde MySQL
+ * Obtener estado de la conversación indexado por sessionId
  */
-async function obtenerEstadoConversacion(telefono) {
+async function obtenerEstadoConversacion(sessionId) {
   try {
-    const [rows] = await pool.query('SELECT * FROM conversaciones WHERE telefono = ?', [telefono]);
+    const [rows] = await pool.query('SELECT * FROM conversaciones WHERE telefono = ?', [sessionId]);
     if (rows && rows.length > 0) {
       const estadoBD = rows[0];
-      estadosEnMemoria.set(telefono, estadoBD);
+      estadosEnMemoria.set(sessionId, estadoBD);
       return estadoBD;
     }
   } catch (error) {}
 
-  if (estadosEnMemoria.has(telefono)) {
-    return estadosEnMemoria.get(telefono);
+  if (estadosEnMemoria.has(sessionId)) {
+    return estadosEnMemoria.get(sessionId);
   }
 
   const nuevoEstado = {
-    telefono,
+    telefono: sessionId,
     paso_actual: 'inicio',
     nombre_temp: null,
     apellido_temp: null,
-    telefono_temp: telefono,
+    telefono_temp: null,
     programa_temp: null,
   };
-  estadosEnMemoria.set(telefono, nuevoEstado);
+  estadosEnMemoria.set(sessionId, nuevoEstado);
   return nuevoEstado;
 }
 
 /**
  * Actualizar atómicamente la conversación en MySQL y Memoria
  */
-async function actualizarConversacion(telefono, nuevosCampos) {
-  const actual = estadosEnMemoria.get(telefono) || { telefono, paso_actual: 'inicio', telefono_temp: telefono };
+async function actualizarConversacion(sessionId, nuevosCampos) {
+  const actual = estadosEnMemoria.get(sessionId) || { telefono: sessionId, paso_actual: 'inicio' };
   const actualizado = { ...actual, ...nuevosCampos };
-  estadosEnMemoria.set(telefono, actualizado);
+  estadosEnMemoria.set(sessionId, actualizado);
 
   try {
     const fields = Object.keys(nuevosCampos);
@@ -171,7 +170,7 @@ async function actualizarConversacion(telefono, nuevosCampos) {
 
     const insertFields = ['telefono', ...fields].join(', ');
     const placeholders = ['?', ...fields.map(() => '?')].join(', ');
-    const insertValues = [telefono, ...updateValues];
+    const insertValues = [sessionId, ...updateValues];
 
     const sql = `
       INSERT INTO conversaciones (${insertFields})
@@ -184,9 +183,9 @@ async function actualizarConversacion(telefono, nuevosCampos) {
 }
 
 /**
- * Guardar Lead final en las tablas `leads_fase2` y `leads` de MySQL
+ * Guardar Lead final en las tablas `leads_fase2` y `leads` de MySQL usando el teléfono manual ingresado
  */
-async function guardarLead(telefono, nombreCompleto, gradoId, gradoTexto) {
+async function guardarLead(telefonoManual, nombreCompleto, gradoId, gradoTexto) {
   try {
     let puntaje = 30;
     if (nombreCompleto) puntaje += 20;
@@ -194,7 +193,7 @@ async function guardarLead(telefono, nombreCompleto, gradoId, gradoTexto) {
     const partes = (nombreCompleto || '').trim().split(/\s+/);
     const nombre = partes[0] || 'Interesado';
     const apellido = partes.slice(1).join(' ') || '';
-    const cleanTel = (telefono || 'Sin número').toString().trim();
+    const cleanTel = (telefonoManual || 'Sin número').toString().trim();
 
     await pool.query(
       `INSERT INTO leads_fase2 (telefono, nombre_contacto, apellido_contacto, grado_interes_id, habeas_data_aceptado, puntaje)
@@ -210,7 +209,7 @@ async function guardarLead(telefono, nombreCompleto, gradoId, gradoTexto) {
       [cleanTel, nombre, apellido, gradoTexto || 'Grado no especificado', nombre, apellido, gradoTexto || 'Grado no especificado']
     );
 
-    console.log(`✅ Lead registrado exitosamente en MySQL con scoring ${puntaje} para ${nombreCompleto} (${cleanTel})`);
+    console.log(`✅ Lead registrado exitosamente en MySQL con scoring ${puntaje} para ${nombreCompleto} (Teléfono Manual: ${cleanTel})`);
   } catch (error) {
     console.error('❌ Error al guardar lead en MySQL:', error.message);
   }
@@ -219,11 +218,11 @@ async function guardarLead(telefono, nombreCompleto, gradoId, gradoTexto) {
 /**
  * Registrar log en la tabla `mensajes_log` de MySQL
  */
-async function registrarLog(telefono, direccion, contenido) {
+async function registrarLog(sessionId, direccion, contenido) {
   try {
     await pool.query(
       'INSERT INTO mensajes_log (telefono, direccion, contenido) VALUES (?, ?, ?)',
-      [telefono, direccion, contenido]
+      [sessionId, direccion, contenido]
     );
   } catch (error) {}
 }
@@ -231,10 +230,10 @@ async function registrarLog(telefono, direccion, contenido) {
 /**
  * Resetear conversación limpia desde 0
  */
-async function resetearConversacionLimpia(telefono) {
-  estadosEnMemoria.delete(telefono);
+async function resetearConversacionLimpia(sessionId) {
+  estadosEnMemoria.delete(sessionId);
   try {
-    await pool.query('DELETE FROM conversaciones WHERE telefono = ?', [telefono]);
+    await pool.query('DELETE FROM conversaciones WHERE telefono = ?', [sessionId]);
   } catch (e) {}
 
   const bienvenidaBD = await obtenerTextoBot(
@@ -242,83 +241,113 @@ async function resetearConversacionLimpia(telefono) {
     '👋 ¡Hola! Bienvenido al Colegio Virtual Educando para la Vida 🎓✨. Somos una institución educativa 100% autorizada 📚.\n\nPara iniciar su registro, ¿cuál es su *Nombre Completo* (Nombres y Apellidos)? ✍️'
   );
 
-  await enviarTexto(telefono, bienvenidaBD);
-  await registrarLog(telefono, 'saliente', bienvenidaBD);
-  await actualizarConversacion(telefono, {
+  await enviarTexto(sessionId, bienvenidaBD);
+  await registrarLog(sessionId, 'saliente', bienvenidaBD);
+  await actualizarConversacion(sessionId, {
     paso_actual: 'nombre',
     nombre_temp: null,
-    telefono_temp: telefono,
+    telefono_temp: null,
     programa_temp: null
   });
 }
 
 /**
- * Enviar tarjeta de recuento general final
+ * Enviar tarjeta de recuento general final utilizando el teléfono manual ingresado
  */
-async function enviarRecuentoGeneralFinal(telefono, estado) {
+async function enviarRecuentoGeneralFinal(sessionId, estado) {
   const nombreComp = estado.nombre_temp || 'No especificado';
+  const telManual = estado.telefono_temp || 'No especificado';
   const progComp = estado.programa_temp || 'No especificado';
 
   const recuento = `📋 *Recuento General de su Registro* ✨\n\n` +
     `Por favor verifique si la información registrada es correcta:\n\n` +
     `👤 *Nombre y Apellidos:* ${nombreComp}\n` +
-    `📲 *Teléfono de Contacto:* ${telefono}\n` +
+    `📲 *Teléfono de Contacto:* ${telManual}\n` +
     `🎓 *Grado Educativo:* ${progComp}\n\n` +
     `Responda enviando el número de su opción:\n` +
     `1️⃣ *1.* Sí, confirmar e inscribirme ✅\n` +
     `2️⃣ *2.* No, reiniciar para corregir datos 🔄`;
 
-  await enviarTexto(telefono, recuento);
-  await registrarLog(telefono, 'saliente', recuento);
+  await enviarTexto(sessionId, recuento);
+  await registrarLog(sessionId, 'saliente', recuento);
 }
 
 /**
- * Procesar mensaje NLU con maquina de estados estricta y lectura directa de MySQL
+ * Procesar mensaje NLU con paso explícito para ingresar el número telefónico manualmente
  */
-async function procesarMensaje(telefono, mensajeTexto) {
+async function procesarMensaje(sessionId, mensajeTexto) {
   const textoLimpio = mensajeTexto ? mensajeTexto.trim() : '';
   const textoNorm = normalizarTexto(textoLimpio);
-  console.log(` PROCESANDO MENSAJE NLU para ${telefono}: "${textoLimpio}" (norm: "${textoNorm}")`);
-  await registrarLog(telefono, 'entrante', textoLimpio);
+  console.log(` PROCESANDO MENSAJE NLU para ${sessionId}: "${textoLimpio}" (norm: "${textoNorm}")`);
+  await registrarLog(sessionId, 'entrante', textoLimpio);
 
   // Comando de reinicio limpio
   if (textoNorm === 'reiniciar' || textoNorm === 'cancelar' || textoNorm === 'inicio' || textoNorm === 'reset' || textoNorm === 'limpiar') {
-    await resetearConversacionLimpia(telefono);
+    await resetearConversacionLimpia(sessionId);
     return;
   }
 
-  const estado = await obtenerEstadoConversacion(telefono);
+  const estado = await obtenerEstadoConversacion(sessionId);
 
   switch (estado.paso_actual) {
     case 'inicio': {
-      await resetearConversacionLimpia(telefono);
+      await resetearConversacionLimpia(sessionId);
       break;
     }
 
     case 'nombre': {
       if (!textoLimpio) {
         const msg = '✍️ Por favor indique su *Nombre Completo* (Nombres y Apellidos) para continuar su solicitud:';
-        await enviarTexto(telefono, msg);
-        await registrarLog(telefono, 'saliente', msg);
+        await enviarTexto(sessionId, msg);
+        await registrarLog(sessionId, 'saliente', msg);
         return;
       }
 
-      // Si el texto es una pregunta FAQ antes de ingresar nombre
+      // Responder FAQ si aplica
       const respuestaFaq = await buscarEnBaseConocimiento(textoLimpio);
       if (respuestaFaq) {
         const msgFaq = `${respuestaFaq}\n\n✍️ Para continuar con su registro, por favor indique su *Nombre Completo* (Nombres y Apellidos):`;
-        await enviarTexto(telefono, msgFaq);
-        await registrarLog(telefono, 'saliente', msgFaq);
+        await enviarTexto(sessionId, msgFaq);
+        await registrarLog(sessionId, 'saliente', msgFaq);
         return;
       }
 
-      // Guardar nombre ingresado y pasar de inmediato a la oferta de Grados de MySQL
-      await actualizarConversacion(telefono, {
+      // Guardar Nombre y pasar al paso explícito de Número Telefónico de Contacto
+      await actualizarConversacion(sessionId, {
         nombre_temp: textoLimpio,
+        paso_actual: 'telefono'
+      });
+
+      const msgTel = `📱 Por favor escriba su *Número de Teléfono / Celular de Contacto* para enviarle la información oficial (Ejemplo: 3218423914): ✍️`;
+      await enviarTexto(sessionId, msgTel);
+      await registrarLog(sessionId, 'saliente', msgTel);
+      break;
+    }
+
+    case 'telefono': {
+      if (!textoLimpio) {
+        const msg = '📱 Por favor ingrese su *Número de Teléfono / Celular de Contacto* (Ejemplo: 3218423914):';
+        await enviarTexto(sessionId, msg);
+        await registrarLog(sessionId, 'saliente', msg);
+        return;
+      }
+
+      // Si el cliente pregunta una FAQ en lugar de escribir su número
+      const respuestaFaq = await buscarEnBaseConocimiento(textoLimpio);
+      if (respuestaFaq) {
+        const msgFaq = `${respuestaFaq}\n\n📱 Para continuar, por favor escriba su *Número de Teléfono / Celular de Contacto* (Ejemplo: 3218423914):`;
+        await enviarTexto(sessionId, msgFaq);
+        await registrarLog(sessionId, 'saliente', msgFaq);
+        return;
+      }
+
+      // Guardar el número ingresado manualmente por el usuario y pasar a los Grados de MySQL
+      await actualizarConversacion(sessionId, {
+        telefono_temp: textoLimpio,
         paso_actual: 'programa'
       });
 
-      await enviarListaGrados(telefono);
+      await enviarListaGrados(sessionId);
       break;
     }
 
@@ -326,13 +355,13 @@ async function procesarMensaje(telefono, mensajeTexto) {
       const gradosDisponibles = await obtenerGradosDinamicos();
       let gradoSeleccionadoText = null;
 
-      // 1. Intentar mapear por número (1, 2, 3, 4, 5)
+      // 1. Coincidencia por número (1, 2, 3, 4, 5)
       const numParsed = parseInt(textoLimpio);
       if (!isNaN(numParsed) && numParsed >= 1 && numParsed <= gradosDisponibles.length) {
         gradoSeleccionadoText = gradosDisponibles[numParsed - 1].nombre;
       }
 
-      // 2. Intentar mapear por nombre textual exacto si no fue un número
+      // 2. Coincidencia parcial por nombre
       if (!gradoSeleccionadoText) {
         const porNombre = gradosDisponibles.find(
           (g) => normalizarTexto(g.nombre).includes(textoNorm) || textoNorm.includes(normalizarTexto(g.nombre))
@@ -342,7 +371,7 @@ async function procesarMensaje(telefono, mensajeTexto) {
         }
       }
 
-      // 3. Si el usuario ingresó un grado válido (por número o nombre)
+      // 3. Grado válido seleccionado
       if (gradoSeleccionadoText) {
         const nuevoEstado = {
           ...estado,
@@ -350,29 +379,29 @@ async function procesarMensaje(telefono, mensajeTexto) {
           paso_actual: 'confirmacion_final',
         };
 
-        await actualizarConversacion(telefono, {
+        await actualizarConversacion(sessionId, {
           programa_temp: gradoSeleccionadoText,
           paso_actual: 'confirmacion_final',
         });
 
-        await enviarRecuentoGeneralFinal(telefono, nuevoEstado);
+        await enviarRecuentoGeneralFinal(sessionId, nuevoEstado);
         return;
       }
 
-      // 4. Si el mensaje es una pregunta de FAQ en lugar de un número de grado
+      // 4. Pregunta de FAQ
       const respuestaFaq = await buscarEnBaseConocimiento(textoLimpio);
       if (respuestaFaq) {
-        await enviarTexto(telefono, respuestaFaq);
-        await registrarLog(telefono, 'saliente', respuestaFaq);
-        await enviarListaGrados(telefono);
+        await enviarTexto(sessionId, respuestaFaq);
+        await registrarLog(sessionId, 'saliente', respuestaFaq);
+        await enviarListaGrados(sessionId);
         return;
       }
 
-      // 5. Si la opción no es válida ni numéricamente ni por FAQ
-      const msgError = '⚠️ La opción ingresada no es válida.\n\nPor favor responda únicamente con el *número* del grado educativo de su interés (Ejemplo: 2):';
-      await enviarTexto(telefono, msgError);
-      await registrarLog(telefono, 'saliente', msgError);
-      await enviarListaGrados(telefono);
+      // 5. Opción no válida
+      const msgError = '⚠️ Opción no válida. Por favor responda únicamente con el número (1 al 5) del grado educativo de su interés:';
+      await enviarTexto(sessionId, msgError);
+      await registrarLog(sessionId, 'saliente', msgError);
+      await enviarListaGrados(sessionId);
       break;
     }
 
@@ -383,6 +412,7 @@ async function procesarMensaje(telefono, mensajeTexto) {
 
       if (esOpUno) {
         const nombreFinal = estado.nombre_temp || 'Interesado';
+        const telManualFinal = estado.telefono_temp || 'Sin número';
         const gradoFinal = estado.programa_temp || 'Sin grado';
 
         const gradosDisponibles = await obtenerGradosDinamicos();
@@ -390,35 +420,35 @@ async function procesarMensaje(telefono, mensajeTexto) {
         const gradoId = gradoEncontrado ? gradoEncontrado.id : null;
 
         // 1. Marcar conversación como finalizada
-        await actualizarConversacion(telefono, { paso_actual: 'finalizado' });
+        await actualizarConversacion(sessionId, { paso_actual: 'finalizado' });
 
-        // 2. Guardar Lead en MySQL (`leads_fase2` y `leads`)
+        // 2. Guardar Lead en MySQL con el teléfono manual escrito por el usuario
         try {
-          await guardarLead(telefono, nombreFinal, gradoId, gradoFinal);
+          await guardarLead(telManualFinal, nombreFinal, gradoId, gradoFinal);
         } catch (e) {
           console.error('Error guardando lead:', e.message);
         }
 
-        // 3. Enviar confirmación oficial desde MySQL
+        // 3. Enviar mensaje de confirmación final
         const confirmacionBase = await obtenerTextoBot(
           'despedida',
-          `🎉 ¡Muchas gracias, ${nombreFinal}! ✨ Hemos registrado exitosamente su inscripción para el programa: *${gradoFinal}* 🎓. Un asesor académico de admisiones se comunicará con usted a la brevedad 📲.`
+          `🎉 ¡Muchas gracias, ${nombreFinal}! ✨ Hemos registrado exitosamente su inscripción para el programa: *${gradoFinal}* 🎓. Un asesor académico de admisiones se comunicará con usted al teléfono *${telManualFinal}* 📲.`
         );
 
         const confirmacionFinal = `${confirmacionBase}\n\n(Escriba *REINICIAR* en cualquier momento si desea realizar otra solicitud) 🌟.`;
-        await enviarTexto(telefono, confirmacionFinal);
-        await registrarLog(telefono, 'saliente', confirmacionFinal);
+        await enviarTexto(sessionId, confirmacionFinal);
+        await registrarLog(sessionId, 'saliente', confirmacionFinal);
         return;
       } else if (esOpDos) {
-        await resetearConversacionLimpia(telefono);
+        await resetearConversacionLimpia(sessionId);
         return;
       } else {
         const respuestaFaq = await buscarEnBaseConocimiento(textoLimpio);
         if (respuestaFaq) {
-          await enviarTexto(telefono, respuestaFaq);
-          await registrarLog(telefono, 'saliente', respuestaFaq);
+          await enviarTexto(sessionId, respuestaFaq);
+          await registrarLog(sessionId, 'saliente', respuestaFaq);
         }
-        await enviarRecuentoGeneralFinal(telefono, estado);
+        await enviarRecuentoGeneralFinal(sessionId, estado);
       }
       break;
     }
@@ -426,18 +456,18 @@ async function procesarMensaje(telefono, mensajeTexto) {
     case 'finalizado': {
       const respuestaFaq = await buscarEnBaseConocimiento(textoLimpio);
       if (respuestaFaq) {
-        await enviarTexto(telefono, respuestaFaq);
-        await registrarLog(telefono, 'saliente', respuestaFaq);
+        await enviarTexto(sessionId, respuestaFaq);
+        await registrarLog(sessionId, 'saliente', respuestaFaq);
       } else {
         const msgFin = `🎓 Gracias por comunicarse con el Colegio Virtual Educando para la Vida. Su solicitud ya fue registrada con éxito 🌟.\n\nEscriba *REINICIAR* si desea realizar una nueva solicitud.`;
-        await enviarTexto(telefono, msgFin);
-        await registrarLog(telefono, 'saliente', msgFin);
+        await enviarTexto(sessionId, msgFin);
+        await registrarLog(sessionId, 'saliente', msgFin);
       }
       break;
     }
 
     default: {
-      await resetearConversacionLimpia(telefono);
+      await resetearConversacionLimpia(sessionId);
     }
   }
 }
