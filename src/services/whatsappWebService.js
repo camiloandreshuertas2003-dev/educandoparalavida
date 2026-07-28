@@ -4,6 +4,10 @@ const QRCode = require('qrcode');
 const path = require('path');
 const fs = require('fs');
 
+// Configurar directorio de cache de Puppeteer dentro del proyecto para persistir en Render
+const localCacheDir = path.join(process.cwd(), '.cache/puppeteer');
+process.env.PUPPETEER_CACHE_DIR = localCacheDir;
+
 let client = null;
 let currentQrCode = null;
 let currentQrDataUri = null;
@@ -12,6 +16,24 @@ let userProfile = null;
 const processedMsgIds = new Set();
 const botSentMsgIds = new Set();
 const contactJidMap = new Map();
+
+function findExecutableInFolder(dir, targetName = 'chrome') {
+  if (!fs.existsSync(dir)) return null;
+  try {
+    const files = fs.readdirSync(dir);
+    for (const file of files) {
+      const fullPath = path.join(dir, file);
+      const stat = fs.statSync(fullPath);
+      if (stat.isDirectory()) {
+        const found = findExecutableInFolder(fullPath, targetName);
+        if (found) return found;
+      } else if (file === targetName && !fullPath.includes('.so') && !fullPath.includes('.png')) {
+        return fullPath;
+      }
+    }
+  } catch (e) {}
+  return null;
+}
 
 function initWhatsAppWeb() {
   if (client) {
@@ -23,66 +45,49 @@ function initWhatsAppWeb() {
 
   let executablePath = null;
 
-  // 1. Probar la ruta predeterminada de Puppeteer solo si el archivo existe en disco
-  try {
-    const puppeteer = require('puppeteer');
-    if (puppeteer && typeof puppeteer.executablePath === 'function') {
-      const pPath = puppeteer.executablePath();
-      if (pPath && fs.existsSync(pPath)) {
-        executablePath = pPath;
-        console.log('🌐 Usando binario verificado de Chrome en:', executablePath);
-      }
-    }
-  } catch (e) {}
+  // 1. Buscar primero en la carpeta de cache local del proyecto ./.cache/puppeteer
+  const localChromeBinary = findExecutableInFolder(localCacheDir, 'chrome');
+  if (localChromeBinary && fs.existsSync(localChromeBinary)) {
+    executablePath = localChromeBinary;
+    console.log('🌐 Encontrado binario local persistente de Chrome en:', executablePath);
+  }
 
-  // 2. Si la ruta por defecto no existe en el contenedor de Render, buscar en rutas Linux y cache local
+  // 2. Si no esta en la carpeta local, probar la API de puppeteer
+  if (!executablePath) {
+    try {
+      const puppeteer = require('puppeteer');
+      if (puppeteer && typeof puppeteer.executablePath === 'function') {
+        const pPath = puppeteer.executablePath();
+        if (pPath && fs.existsSync(pPath)) {
+          executablePath = pPath;
+          console.log('🌐 Usando binario de Puppeteer en:', executablePath);
+        }
+      }
+    } catch (e) {}
+  }
+
+  // 3. Probar rutas del sistema Linux si aplica
   if (!executablePath) {
     const systemPaths = [
       '/usr/bin/google-chrome',
       '/usr/bin/google-chrome-stable',
       '/usr/bin/chromium-browser',
-      '/usr/bin/chromium',
-      path.join(process.cwd(), '.cache/puppeteer')
+      '/usr/bin/chromium'
     ];
 
     for (const sysPath of systemPaths) {
-      try {
-        if (fs.existsSync(sysPath)) {
-          if (fs.statSync(sysPath).isDirectory()) {
-            const findChrome = (dir) => {
-              try {
-                const files = fs.readdirSync(dir);
-                for (const file of files) {
-                  const fullPath = path.join(dir, file);
-                  const stat = fs.statSync(fullPath);
-                  if (stat.isDirectory()) {
-                    const found = findChrome(fullPath);
-                    if (found) return found;
-                  } else if (file === 'chrome' && !fullPath.includes('.so')) {
-                    return fullPath;
-                  }
-                }
-              } catch (e) {}
-              return null;
-            };
-            const found = findChrome(sysPath);
-            if (found) {
-              executablePath = found;
-              break;
-            }
-          } else {
-            executablePath = sysPath;
-            break;
-          }
-        }
-      } catch (e) {}
+      if (fs.existsSync(sysPath)) {
+        executablePath = sysPath;
+        console.log('🌐 Encontrado ejecutable del sistema en:', executablePath);
+        break;
+      }
     }
   }
 
   if (executablePath) {
     console.log('🌐 Ejecutable final de Chrome validado:', executablePath);
   } else {
-    console.log('🌐 Usando resolución automática del navegador Puppeteer (sin executablePath forzado)');
+    console.log('🌐 Usando resolución predeterminada del navegador Puppeteer');
   }
 
   const puppeteerArgs = [
