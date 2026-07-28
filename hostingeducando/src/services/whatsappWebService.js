@@ -128,11 +128,17 @@ async function initWhatsAppWeb() {
           }
         }
 
-        const remoteJid = msg.key.remoteJid;
-        if (!remoteJid || remoteJid.includes('@g.us')) continue; // Ignorar grupos
+        let rawSenderJid = msg.key.remoteJidAlt || msg.key.participant || msg.key.remoteJid || '';
+        let fromNumber = rawSenderJid.split('@')[0].split(':')[0].replace(/[^\d]/g, '');
 
-        const fromNumber = remoteJid.split('@')[0].split(':')[0].replace(/[^\d]/g, '');
-        contactJidMap.set(fromNumber, remoteJid);
+        // Si fromNumber es un LID (mas de 13 digitos), preferir remoteJid si no es LID o remoteJidAlt
+        if (fromNumber.length > 13) {
+          if (msg.key.remoteJid && !msg.key.remoteJid.includes('@lid')) {
+            fromNumber = msg.key.remoteJid.split('@')[0].split(':')[0].replace(/[^\d]/g, '');
+          }
+        }
+
+        contactJidMap.set(fromNumber, msg.key.remoteJid);
 
         const textContent =
           msg.message.conversation ||

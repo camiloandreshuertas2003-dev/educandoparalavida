@@ -377,7 +377,11 @@ async function procesarMensaje(telefono, mensajeTexto) {
     }
 
     case 'confirmacion_final': {
-      if (textoNorm === '1' || textoNorm === 'si' || textoNorm === 'confirmar' || textoNorm === 'ok' || textoNorm === 'inscribirme' || textoNorm === '1.') {
+      const primerCaracter = textoNorm.charAt(0);
+      const esOpUno = primerCaracter === '1' || textoNorm.includes('si') || textoNorm.includes('confirmar') || textoNorm.includes('ok') || textoNorm.includes('inscribirme');
+      const esOpDos = primerCaracter === '2' || textoNorm.includes('no') || textoNorm.includes('reiniciar') || textoNorm.includes('corregir');
+
+      if (esOpUno) {
         const nombreFinal = estado.nombre_temp || 'Interesado';
         const gradoFinal = estado.programa_temp || 'Sin grado';
 
@@ -404,8 +408,10 @@ async function procesarMensaje(telefono, mensajeTexto) {
         const confirmacionFinal = `${confirmacionBase}\n\n(Escriba *REINICIAR* en cualquier momento si desea realizar otra solicitud) 🌟.`;
         await enviarTexto(telefono, confirmacionFinal);
         await registrarLog(telefono, 'saliente', confirmacionFinal);
-      } else if (textoNorm === '2' || textoNorm === 'no' || textoNorm === 'reiniciar' || textoNorm === '2.') {
+        return;
+      } else if (esOpDos) {
         await resetearConversacionLimpia(telefono);
+        return;
       } else {
         const respuestaFaq = await buscarEnBaseConocimiento(textoLimpio);
         if (respuestaFaq) {
