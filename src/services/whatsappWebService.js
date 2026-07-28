@@ -1,260 +1,167 @@
-const { Client, LocalAuth } = require('whatsapp-web.js');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestWaWebVersion } = require('@whiskeysockets/baileys');
 const qrcodeTerminal = require('qrcode-terminal');
 const QRCode = require('qrcode');
 const path = require('path');
 const fs = require('fs');
+const pino = require('pino');
 
-// Configurar directorio de cache de Puppeteer dentro del proyecto para persistir en Render
-const localCacheDir = path.join(process.cwd(), '.cache/puppeteer');
-process.env.PUPPETEER_CACHE_DIR = localCacheDir;
-
-let client = null;
+let sock = null;
 let currentQrCode = null;
 let currentQrDataUri = null;
 let clientStatus = 'disconnected'; // 'disconnected', 'initializing', 'qr_ready', 'authenticated', 'ready'
 let userProfile = null;
 const processedMsgIds = new Set();
 const botSentMsgIds = new Set();
-const contactJidMap = new Map();
 
-function findExecutableInFolder(dir, targetName = 'chrome') {
-  if (!fs.existsSync(dir)) return null;
-  try {
-    const files = fs.readdirSync(dir);
-    for (const file of files) {
-      const fullPath = path.join(dir, file);
-      const stat = fs.statSync(fullPath);
-      if (stat.isDirectory()) {
-        const found = findExecutableInFolder(fullPath, targetName);
-        if (found) return found;
-      } else if (file === targetName && !fullPath.includes('.so') && !fullPath.includes('.png')) {
-        return fullPath;
-      }
-    }
-  } catch (e) {}
-  return null;
-}
+const authFolder = path.join(__dirname, '../../.baileys_auth');
 
-function initWhatsAppWeb() {
-  if (client) {
-    return client;
+async function initWhatsAppWeb() {
+  if (sock) {
+    return sock;
   }
 
-  console.log('⚡ Inicializando cliente WhatsApp Web (QR Mode con optimización de memoria de 256MB RAM)...');
+  console.log('⚡ Inicializando motor ultra-liviano WhatsApp Web (Baileys WebSocket 35MB RAM)...');
   clientStatus = 'initializing';
 
-  let executablePath = null;
+  try {
+    const { state, saveCreds } = await useMultiFileAuthState(authFolder);
+    const { version } = await fetchLatestWaWebVersion().catch(() => ({ version: [2, 3000, 1015901307] }));
 
-  // 1. Buscar en la carpeta local de cache ./.cache/puppeteer
-  const localChromeBinary = findExecutableInFolder(localCacheDir, 'chrome');
-  if (localChromeBinary && fs.existsSync(localChromeBinary)) {
-    executablePath = localChromeBinary;
-    console.log('🌐 Encontrado binario local de Chrome en:', executablePath);
-  }
+    sock = makeWASocket({
+      version,
+      auth: state,
+      printQRInTerminal: false,
+      logger: pino({ level: 'silent' }),
+      browser: ['Educando para la Vida', 'Chrome', '1.0.0'],
+      connectTimeoutMs: 60000,
+      keepAliveIntervalMs: 25000,
+      emitOwnEvents: false,
+    });
 
-  // 2. Probar la API de puppeteer
-  if (!executablePath) {
-    try {
-      const puppeteer = require('puppeteer');
-      if (puppeteer && typeof puppeteer.executablePath === 'function') {
-        const pPath = puppeteer.executablePath();
-        if (pPath && fs.existsSync(pPath)) {
-          executablePath = pPath;
-          console.log('🌐 Usando binario de Puppeteer en:', executablePath);
+    sock.ev.on('creds.update', saveCreds);
+
+    sock.ev.on('connection.update', async (update) => {
+      const { connection, lastDisconnect, qr } = update;
+
+      if (qr) {
+        console.log('===================================================');
+        console.log('📱 ¡NUEVO CÓDIGO QR GENERADO DE WHATSAPP WEB!');
+        console.log('===================================================');
+        currentQrCode = qr;
+        clientStatus = 'qr_ready';
+        qrcodeTerminal.generate(qr, { small: true });
+
+        try {
+          currentQrDataUri = await QRCode.toDataURL(qr);
+        } catch (err) {
+          console.error('Error generando Data URI del QR:', err.message);
         }
       }
-    } catch (e) {}
+
+      if (connection === 'connecting') {
+        if (clientStatus !== 'qr_ready') {
+          clientStatus = 'initializing';
+        }
+      }
+
+      if (connection === 'open') {
+        console.log('🎉 ¡WHATSAPP WEB CLIENTE LISTO Y CONECTADO 100%! (Baileys WebSocket Active)');
+        clientStatus = 'ready';
+        currentQrCode = null;
+        currentQrDataUri = null;
+
+        try {
+          const userJid = sock.user ? sock.user.id : '';
+          const cleanPhone = userJid ? userJid.split(':')[0].split('@')[0] : '';
+          userProfile = {
+            name: sock.user ? (sock.user.name || 'Colegio Educando para la Vida') : 'Colegio Educando para la Vida',
+            phone: cleanPhone
+          };
+          console.log(`📱 Sesión iniciada como: ${userProfile.name} (+${userProfile.phone})`);
+        } catch (e) {}
+      }
+
+      if (connection === 'close') {
+        const statusCode = lastDisconnect?.error?.output?.statusCode;
+        const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+        console.warn(`⚠️ Conexión de WhatsApp cerrada (Código ${statusCode}). Reorganizando: ${shouldReconnect}`);
+
+        clientStatus = 'disconnected';
+        currentQrCode = null;
+        currentQrDataUri = null;
+        sock = null;
+
+        if (statusCode === DisconnectReason.loggedOut) {
+          try {
+            if (fs.existsSync(authFolder)) {
+              fs.rmSync(authFolder, { recursive: true, force: true });
+            }
+          } catch (e) {}
+        }
+
+        if (shouldReconnect) {
+          setTimeout(() => {
+            initWhatsAppWeb();
+          }, 3000);
+        }
+      }
+    });
+
+    // Escuchar únicamente mensajes entrantes de clientes
+    sock.ev.on('messages.upsert', async (m) => {
+      if (!m || !m.messages || m.messages.length === 0) return;
+
+      for (const msg of m.messages) {
+        if (!msg.message) continue;
+        if (msg.key.fromMe) continue; // Ignorar mensajes propios del bot
+
+        const msgId = msg.key.id;
+        if (msgId && (processedMsgIds.has(msgId) || botSentMsgIds.has(msgId))) {
+          continue;
+        }
+        if (msgId) {
+          processedMsgIds.add(msgId);
+          if (processedMsgIds.size > 2000) {
+            const first = processedMsgIds.values().next().value;
+            processedMsgIds.delete(first);
+          }
+        }
+
+        const remoteJid = msg.key.remoteJid;
+        if (!remoteJid || remoteJid.includes('@g.us')) continue; // Ignorar grupos
+
+        const fromNumber = remoteJid.replace(/[^\d]/g, '');
+        const textContent =
+          msg.message.conversation ||
+          msg.message.extendedTextMessage?.text ||
+          msg.message.buttonsResponseBodyText ||
+          '';
+
+        const textoLimpio = textContent.trim();
+        if (!textoLimpio) continue;
+
+        console.log(`📩 [WhatsApp Web Baileys] Mensaje entrante de cliente ${fromNumber}: "${textoLimpio}"`);
+
+        const { procesarMensaje } = require('./conversationService');
+        try {
+          await procesarMensaje(fromNumber, textoLimpio);
+        } catch (err) {
+          console.error(`❌ Error procesando mensaje de ${fromNumber}:`, err.message);
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error('❌ Error inicializando Baileys WhatsApp:', err.message);
+    clientStatus = 'disconnected';
+    sock = null;
   }
 
-  // 3. Probar rutas del sistema Linux
-  if (!executablePath) {
-    const systemPaths = [
-      '/usr/bin/google-chrome',
-      '/usr/bin/google-chrome-stable',
-      '/usr/bin/chromium-browser',
-      '/usr/bin/chromium'
-    ];
-
-    for (const sysPath of systemPaths) {
-      if (fs.existsSync(sysPath)) {
-        executablePath = sysPath;
-        console.log('🌐 Encontrado ejecutable del sistema en:', executablePath);
-        break;
-      }
-    }
-  }
-
-  // BANDERAS DE ULTRA-BAJO CONSUMO DE MEMORIA RAM (< 280MB) PARA RENDER
-  const puppeteerArgs = [
-    '--no-sandbox',
-    '--disable-setuid-sandbox',
-    '--disable-dev-shm-usage',
-    '--disable-accelerated-2d-canvas',
-    '--no-first-run',
-    '--no-zygote',
-    '--single-process', // CRÍTICO: Mantener todo en un solo proceso
-    '--disable-gpu',
-    '--disable-software-rasterizer',
-    '--js-flags="--max-old-space-size=256"', // RESTRINGIR MOTOR JS DE CHROME A MÁXIMO 256MB RAM
-    '--disable-extensions',
-    '--disable-component-extensions-with-background-pages',
-    '--disable-default-apps',
-    '--mute-audio',
-    '--no-default-browser-check',
-    '--disable-background-networking',
-    '--disable-background-timer-throttling',
-    '--disable-backgrounding-occluded-windows',
-    '--disable-breakpad',
-    '--disable-client-side-phishing-detection',
-    '--disable-component-update',
-    '--disable-domain-reliability',
-    '--disable-hang-monitor',
-    '--disable-ipc-flooding-protection',
-    '--disable-notifications',
-    '--disable-popup-blocking',
-    '--disable-print-preview',
-    '--disable-prompt-on-repost',
-    '--disable-renderer-backgrounding',
-    '--disable-speech-api',
-    '--disable-sync',
-    '--hide-scrollbars',
-    '--metrics-recording-only'
-  ];
-
-  client = new Client({
-    authStrategy: new LocalAuth({
-      clientId: 'colegio-bot-session',
-      dataPath: path.join(__dirname, '../../.wwebjs_auth')
-    }),
-    webVersionCache: {
-      type: 'remote',
-      remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.1014587033-alpha.html'
-    },
-    puppeteer: {
-      headless: true,
-      executablePath: executablePath || undefined,
-      args: puppeteerArgs,
-      timeout: 180000
-    }
-  });
-
-  client.on('qr', async (qr) => {
-    console.log('===================================================');
-    console.log('📱 ¡NUEVO CÓDIGO QR GENERADO DE WHATSAPP WEB!');
-    console.log('===================================================');
-    
-    currentQrCode = qr;
-    clientStatus = 'qr_ready';
-
-    qrcodeTerminal.generate(qr, { small: true });
-
-    try {
-      currentQrDataUri = await QRCode.toDataURL(qr);
-    } catch (err) {
-      console.error('Error generando Data URI del QR:', err.message);
-    }
-  });
-
-  client.on('authenticated', () => {
-    console.log('✅ WhatsApp Web Autenticado con éxito! Sincronizando en modo bajo consumo...');
-    clientStatus = 'authenticated';
-    currentQrCode = null;
-    currentQrDataUri = null;
-  });
-
-  client.on('auth_failure', (msg) => {
-    console.error('❌ Error de Autenticación WhatsApp Web:', msg);
-    clientStatus = 'disconnected';
-    client = null;
-  });
-
-  client.on('ready', async () => {
-    console.log('🎉 ¡WHATSAPP WEB CLIENTE LISTO Y CONECTADO 100%!');
-    clientStatus = 'ready';
-    currentQrCode = null;
-    currentQrDataUri = null;
-
-    try {
-      const info = client.info;
-      const cleanMyPhone = info.wid ? info.wid.user : '';
-      userProfile = {
-        name: info.pushname || 'Colegio Educando para la Vida',
-        phone: cleanMyPhone
-      };
-      if (cleanMyPhone && info.wid._serialized) {
-        contactJidMap.set(cleanMyPhone, info.wid._serialized);
-      }
-      console.log(`📱 Sesión iniciada como: ${userProfile.name} (+${userProfile.phone})`);
-    } catch (e) {}
-  });
-
-  client.on('disconnected', (reason) => {
-    console.warn('⚠️ WhatsApp Web desconectado:', reason);
-    clientStatus = 'disconnected';
-    currentQrCode = null;
-    currentQrDataUri = null;
-    client = null;
-  });
-
-  // Manejar únicamente mensajes entrantes de CLIENTES
-  async function manejarMensaje(msg) {
-    if (!msg || !msg.body) return;
-
-    if (msg.fromMe || (msg.id && msg.id.fromMe)) {
-      return;
-    }
-
-    const msgIdStr = msg.id ? (msg.id.id || msg.id._serialized) : null;
-    if (msgIdStr && (processedMsgIds.has(msgIdStr) || botSentMsgIds.has(msgIdStr))) {
-      return;
-    }
-    if (msgIdStr) {
-      processedMsgIds.add(msgIdStr);
-      if (processedMsgIds.size > 2000) {
-        const first = processedMsgIds.values().next().value;
-        processedMsgIds.delete(first);
-      }
-    }
-
-    const texto = msg.body.trim();
-    if (!texto) return;
-
-    let targetJid = msg.from;
-    let fromNumber = msg.from.replace(/[^\d]/g, '');
-
-    try {
-      const contact = await msg.getContact();
-      if (contact && contact.number) {
-        fromNumber = contact.number.replace(/[^\d]/g, '');
-      }
-    } catch (e) {}
-
-    contactJidMap.set(fromNumber, targetJid);
-    contactJidMap.set(msg.from, targetJid);
-
-    console.log(`📩 [WhatsApp Web] Mensaje entrante de cliente ${fromNumber}: "${texto}"`);
-
-    const { procesarMensaje } = require('./conversationService');
-    try {
-      await procesarMensaje(fromNumber, texto);
-    } catch (err) {
-      console.error(`❌ Error procesando mensaje de ${fromNumber}:`, err.message);
-    }
-  }
-
-  client.on('message', manejarMensaje);
-
-  client.initialize().catch((err) => {
-    console.error('❌ Error inicializando Puppeteer para WhatsApp Web:', err.message);
-    clientStatus = 'disconnected';
-    client = null;
-  });
-
-  return client;
+  return sock;
 }
 
 function getWWebStatus() {
-  if (clientStatus === 'disconnected' && !client) {
+  if (clientStatus === 'disconnected' && !sock) {
     try {
       initWhatsAppWeb();
     } catch (e) {}
@@ -268,29 +175,26 @@ function getWWebStatus() {
 }
 
 function isWhatsAppWebReady() {
-  return clientStatus === 'ready' && client !== null;
+  return clientStatus === 'ready' && sock !== null;
 }
 
 async function logoutWhatsAppWeb() {
-  console.log('🔴 Cerrando sesión de WhatsApp Web y borrando credenciales...');
-  if (client) {
+  console.log('🔴 Cerrando sesión de WhatsApp Web y eliminando credenciales Baileys...');
+  if (sock) {
     try {
-      await client.logout();
+      await sock.logout();
     } catch (e) {}
-    try {
-      await client.destroy();
-    } catch (e) {}
-    client = null;
+    sock = null;
   }
+
   clientStatus = 'disconnected';
   currentQrCode = null;
   currentQrDataUri = null;
   userProfile = null;
 
   try {
-    const authPath = path.join(__dirname, '../../.wwebjs_auth');
-    if (fs.existsSync(authPath)) {
-      fs.rmSync(authPath, { recursive: true, force: true });
+    if (fs.existsSync(authFolder)) {
+      fs.rmSync(authFolder, { recursive: true, force: true });
     }
   } catch (e) {}
 
@@ -303,29 +207,24 @@ async function logoutWhatsAppWeb() {
 
 async function enviarMensajeWWeb(telefono, mensaje) {
   if (!isWhatsAppWebReady()) {
-    throw new Error('WhatsApp Web no está autenticado o listo');
+    throw new Error('WhatsApp Web no está listo o conectado');
   }
 
   const cleanPhone = telefono.toString().replace(/[^\d]/g, '');
-  let targetJid = contactJidMap.get(cleanPhone) || contactJidMap.get(telefono) || `${cleanPhone}@c.us`;
+  const targetJid = `${cleanPhone}@s.whatsapp.net`;
 
-  console.log(`📤 [WhatsApp Web] Enviando mensaje a ${cleanPhone} (JID: ${targetJid})...`);
+  console.log(`📤 [WhatsApp Web Baileys] Enviando mensaje a ${cleanPhone}...`);
 
   try {
-    const result = await client.sendMessage(targetJid, mensaje);
-    if (result && result.id && (result.id.id || result.id._serialized)) {
-      botSentMsgIds.add(result.id.id || result.id._serialized);
+    const result = await sock.sendMessage(targetJid, { text: mensaje });
+    if (result && result.key && result.key.id) {
+      botSentMsgIds.add(result.key.id);
     }
-    console.log(`📤 [WhatsApp Web] Mensaje enviado exitosamente a ${cleanPhone}`);
+    console.log(`📤 [WhatsApp Web Baileys] Mensaje enviado exitosamente a ${cleanPhone}`);
     return result;
   } catch (err) {
-    console.warn(`⚠️ Error enviando a JID ${targetJid}, intentando fallback a @c.us:`, err.message);
-    const fallbackJid = `${cleanPhone}@c.us`;
-    const result = await client.sendMessage(fallbackJid, mensaje);
-    if (result && result.id && (result.id.id || result.id._serialized)) {
-      botSentMsgIds.add(result.id.id || result.id._serialized);
-    }
-    return result;
+    console.error(`❌ Error enviando mensaje a ${cleanPhone}:`, err.message);
+    throw err;
   }
 }
 
