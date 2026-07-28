@@ -10,11 +10,50 @@ let currentQrCode = null;
 let currentQrDataUri = null;
 let clientStatus = 'disconnected'; // 'disconnected', 'initializing', 'qr_ready', 'authenticated', 'ready'
 let userProfile = null;
+
 const processedMsgIds = new Set();
 const botSentMsgIds = new Set();
 const contactJidMap = new Map();
+const lidToPhoneMap = new Map();
 
 const authFolder = path.join(__dirname, '../../.baileys_auth');
+
+/**
+ * Resolver telefono real evitando descalces entre LIDs e identificadores de usuario
+ */
+function normalizarTelefonoCliente(msg) {
+  const remoteJid = msg.key.remoteJid || '';
+  const participant = msg.key.participant || '';
+  const remoteJidAlt = msg.key.remoteJidAlt || '';
+
+  // 1. Buscar JID que termine en @s.whatsapp.net (telefono real)
+  const phoneJid = [remoteJidAlt, participant, remoteJid].find(j => j && j.includes('@s.whatsapp.net'));
+  
+  if (phoneJid) {
+    const cleanPhone = phoneJid.split('@')[0].split(':')[0].replace(/[^\d]/g, '');
+    if (cleanPhone && cleanPhone.length <= 13) {
+      if (remoteJid.includes('@lid')) {
+        const lidClean = remoteJid.split('@')[0];
+        lidToPhoneMap.set(lidClean, cleanPhone);
+      }
+      contactJidMap.set(cleanPhone, remoteJid);
+      return cleanPhone;
+    }
+  }
+
+  // 2. Extraer del remoteJid principal
+  const rawId = remoteJid.split('@')[0].split(':')[0].replace(/[^\d]/g, '');
+  
+  // 3. Si es un LID mapeado previamente a un telefono real
+  if (lidToPhoneMap.has(rawId)) {
+    const realTel = lidToPhoneMap.get(rawId);
+    contactJidMap.set(realTel, remoteJid);
+    return realTel;
+  }
+
+  contactJidMap.set(rawId, remoteJid);
+  return rawId;
+}
 
 async function initWhatsAppWeb() {
   if (sock) {
@@ -108,13 +147,13 @@ async function initWhatsAppWeb() {
       }
     });
 
-    // Escuchar únicamente notificaciones en vivo de mensajes entrantes de clientes
+    // Escuchar notificaciones de mensajes entrantes de clientes
     sock.ev.on('messages.upsert', async (m) => {
       if (!m || m.type !== 'notify' || !m.messages || m.messages.length === 0) return;
 
       for (const msg of m.messages) {
         if (!msg.message) continue;
-        if (msg.key.fromMe) continue; // Ignorar mensajes propios del bot
+        if (msg.key.fromMe) continue;
 
         const msgId = msg.key.id;
         if (msgId && (processedMsgIds.has(msgId) || botSentMsgIds.has(msgId))) {
@@ -128,17 +167,10 @@ async function initWhatsAppWeb() {
           }
         }
 
-        let rawSenderJid = msg.key.remoteJidAlt || msg.key.participant || msg.key.remoteJid || '';
-        let fromNumber = rawSenderJid.split('@')[0].split(':')[0].replace(/[^\d]/g, '');
+        const remoteJid = msg.key.remoteJid;
+        if (!remoteJid || remoteJid.includes('@g.us')) continue; // Ignorar grupos
 
-        // Si fromNumber es un LID (mas de 13 digitos), preferir remoteJid si no es LID o remoteJidAlt
-        if (fromNumber.length > 13) {
-          if (msg.key.remoteJid && !msg.key.remoteJid.includes('@lid')) {
-            fromNumber = msg.key.remoteJid.split('@')[0].split(':')[0].replace(/[^\d]/g, '');
-          }
-        }
-
-        contactJidMap.set(fromNumber, msg.key.remoteJid);
+        const fromNumber = normalizarTelefonoCliente(msg);
 
         const textContent =
           msg.message.conversation ||
@@ -221,7 +253,15 @@ async function enviarMensajeWWeb(telefono, mensaje) {
   }
 
   const cleanPhone = telefono.toString().replace(/[^\d]/g, '');
-  const targetJid = contactJidMap.get(cleanPhone) || `${cleanPhone}@s.whatsapp.net`;
+  let targetJid = contactJidMap.get(cleanPhone) || contactJidMap.get(telefono);
+
+  if (!targetJid) {
+    if (cleanPhone.length > 13) {
+      targetJid = `${cleanPhone}@lid`;
+    } else {
+      targetJid = `${cleanPhone}@s.whatsapp.net`;
+    }
+  }
 
   console.log(`📤 [WhatsApp Web Baileys] Enviando mensaje a ${cleanPhone} (${targetJid})...`);
 
