@@ -7,7 +7,7 @@ const fs = require('fs');
 let client = null;
 let currentQrCode = null;
 let currentQrDataUri = null;
-let clientStatus = 'disconnected'; // 'disconnected', 'qr_ready', 'authenticated', 'ready'
+let clientStatus = 'disconnected'; // 'disconnected', 'initializing', 'qr_ready', 'authenticated', 'ready'
 let userProfile = null;
 const processedMsgIds = new Set();
 const botSentMsgIds = new Set();
@@ -21,6 +21,29 @@ function initWhatsAppWeb() {
   console.log('⚡ Inicializando cliente WhatsApp Web (QR Mode)...');
   clientStatus = 'initializing';
 
+  let executablePath;
+  try {
+    const puppeteer = require('puppeteer');
+    if (puppeteer && typeof puppeteer.executablePath === 'function') {
+      executablePath = puppeteer.executablePath();
+      console.log('🌐 Usando binario de Chrome para Puppeteer en:', executablePath);
+    }
+  } catch (e) {
+    console.warn('⚠️ Nota obteniendo executablePath de puppeteer:', e.message);
+  }
+
+  const puppeteerArgs = [
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-dev-shm-usage',
+    '--disable-accelerated-2d-canvas',
+    '--no-first-run',
+    '--no-zygote',
+    '--single-process',
+    '--disable-gpu',
+    '--disable-software-rasterizer'
+  ];
+
   client = new Client({
     authStrategy: new LocalAuth({
       clientId: 'colegio-bot-session',
@@ -28,15 +51,9 @@ function initWhatsAppWeb() {
     }),
     puppeteer: {
       headless: true,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas',
-        '--no-first-run',
-        '--no-zygote',
-        '--disable-gpu'
-      ]
+      executablePath: executablePath || undefined,
+      args: puppeteerArgs,
+      timeout: 120000
     }
   });
 
@@ -68,6 +85,7 @@ function initWhatsAppWeb() {
   client.on('auth_failure', (msg) => {
     console.error('❌ Error de Autenticación WhatsApp Web:', msg);
     clientStatus = 'disconnected';
+    client = null;
   });
 
   client.on('ready', async () => {
@@ -95,35 +113,35 @@ function initWhatsAppWeb() {
     clientStatus = 'disconnected';
     currentQrCode = null;
     currentQrDataUri = null;
+    client = null;
   });
 
-  // Manejar únicamente mensajes entrantes de CLIENTES (Ignorar mensajes propios del Bot)
+  // Manejar únicamente mensajes entrantes de CLIENTES
   async function manejarMensaje(msg) {
-    if (!msg || !msg.from || !msg.id || !msg.id.id) return;
+    if (!msg || !msg.body) return;
 
-    // IGNORED CRÍTICO: Nunca procesar mensajes propios (fromMe) ni emitidos por el propio bot
-    if (msg.fromMe || botSentMsgIds.has(msg.id.id)) {
-      return;
-    }
-    
-    // Evitar procesar el mismo mensaje dos veces
-    if (processedMsgIds.has(msg.id.id)) return;
-    processedMsgIds.add(msg.id.id);
-    if (processedMsgIds.size > 1000) processedMsgIds.clear();
-
-    // Solo procesar chats individuales (@c.us o @lid), NUNCA grupos (@g.us)
-    const isIndividual = (msg.from && (msg.from.endsWith('@c.us') || msg.from.endsWith('@lid')));
-    if (!isIndividual) {
+    if (msg.fromMe || (msg.id && msg.id.fromMe)) {
       return;
     }
 
-    const texto = msg.body ? msg.body.trim() : '';
+    const msgIdStr = msg.id ? (msg.id.id || msg.id._serialized) : null;
+    if (msgIdStr && (processedMsgIds.has(msgIdStr) || botSentMsgIds.has(msgIdStr))) {
+      return;
+    }
+    if (msgIdStr) {
+      processedMsgIds.add(msgIdStr);
+      if (processedMsgIds.size > 2000) {
+        const first = processedMsgIds.values().next().value;
+        processedMsgIds.delete(first);
+      }
+    }
+
+    const texto = msg.body.trim();
     if (!texto) return;
 
     let targetJid = msg.from;
-    let fromNumber = msg.from.replace('@c.us', '').replace('@lid', '').replace(/[^\d]/g, '');
+    let fromNumber = msg.from.replace(/[^\d]/g, '');
 
-    // Intentar resolver el número de teléfono real del contacto desde WhatsApp
     try {
       const contact = await msg.getContact();
       if (contact && contact.number) {
@@ -131,7 +149,6 @@ function initWhatsAppWeb() {
       }
     } catch (e) {}
 
-    // Mapear el número formateado con su JID real para respuesta garantizada
     contactJidMap.set(fromNumber, targetJid);
     contactJidMap.set(msg.from, targetJid);
 
@@ -145,12 +162,12 @@ function initWhatsAppWeb() {
     }
   }
 
-  // Usar únicamente 'message' para ignorar eventos de creación propia
   client.on('message', manejarMensaje);
 
   client.initialize().catch((err) => {
     console.error('❌ Error inicializando Puppeteer para WhatsApp Web:', err.message);
     clientStatus = 'disconnected';
+    client = null;
   });
 
   return client;
@@ -185,53 +202,50 @@ async function logoutWhatsAppWeb() {
     } catch (e) {}
     client = null;
   }
-
   clientStatus = 'disconnected';
   currentQrCode = null;
   currentQrDataUri = null;
   userProfile = null;
 
-  const sessionPath = path.join(__dirname, '../../.wwebjs_auth');
   try {
-    if (fs.existsSync(sessionPath)) {
-      fs.rmSync(sessionPath, { recursive: true, force: true });
+    const authPath = path.join(__dirname, '../../.wwebjs_auth');
+    if (fs.existsSync(authPath)) {
+      fs.rmSync(authPath, { recursive: true, force: true });
     }
-  } catch (e) {
-    console.warn('⚠️ No se pudo borrar la carpeta .wwebjs_auth:', e.message);
-  }
+  } catch (e) {}
 
-  // Generar nuevo cliente para escanear nuevo QR
-  initWhatsAppWeb();
-  return getWWebStatus();
+  setTimeout(() => {
+    initWhatsAppWeb();
+  }, 2000);
+
+  return { status: 'disconnected', message: 'Sesión de WhatsApp cerrada exitosamente' };
 }
 
-async function enviarMensajeWWeb(to, texto) {
+async function enviarMensajeWWeb(telefono, mensaje) {
   if (!isWhatsAppWebReady()) {
-    throw new Error('WhatsApp Web no está conectado');
+    throw new Error('WhatsApp Web no está autenticado o listo');
   }
 
-  const cleanTo = to.replace(/[^\d]/g, '');
-  let targetJid = contactJidMap.get(cleanTo) || contactJidMap.get(to) || `${cleanTo}@c.us`;
+  const cleanPhone = telefono.toString().replace(/[^\d]/g, '');
+  let targetJid = contactJidMap.get(cleanPhone) || contactJidMap.get(telefono) || `${cleanPhone}@c.us`;
+
+  console.log(`📤 [WhatsApp Web] Enviando mensaje a ${cleanPhone} (JID: ${targetJid})...`);
 
   try {
-    const res = await client.sendMessage(targetJid, texto);
-    if (res && res.id && res.id.id) {
-      botSentMsgIds.add(res.id.id);
-      if (botSentMsgIds.size > 2000) botSentMsgIds.clear();
+    const result = await client.sendMessage(targetJid, mensaje);
+    if (result && result.id && (result.id.id || result.id._serialized)) {
+      botSentMsgIds.add(result.id.id || result.id._serialized);
     }
-    console.log(`📤 [WhatsApp Web] Mensaje enviado exitosamente a ${to}`);
-    return res;
+    console.log(`📤 [WhatsApp Web] Mensaje enviado exitosamente a ${cleanPhone}`);
+    return result;
   } catch (err) {
-    if (targetJid !== `${cleanTo}@c.us`) {
-      const fallbackJid = `${cleanTo}@c.us`;
-      const res = await client.sendMessage(fallbackJid, texto);
-      if (res && res.id && res.id.id) {
-        botSentMsgIds.add(res.id.id);
-      }
-      console.log(`📤 [WhatsApp Web Fallback] Mensaje enviado exitosamente a ${to}`);
-      return res;
+    console.warn(`⚠️ Error enviando a JID ${targetJid}, intentando fallback a @c.us:`, err.message);
+    const fallbackJid = `${cleanPhone}@c.us`;
+    const result = await client.sendMessage(fallbackJid, mensaje);
+    if (result && result.id && (result.id.id || result.id._serialized)) {
+      botSentMsgIds.add(result.id.id || result.id._serialized);
     }
-    throw err;
+    return result;
   }
 }
 
