@@ -163,7 +163,7 @@ async function actualizarConversacion(sessionId, nuevosCampos) {
 
   try {
     const fields = Object.keys(nuevosCampos);
-    if (fields.length === 0) return;
+    if (fields.length === 0) return actualizado;
 
     const setClause = fields.map((f) => `${f} = ?`).join(', ');
     const updateValues = fields.map((f) => nuevosCampos[f]);
@@ -179,7 +179,10 @@ async function actualizarConversacion(sessionId, nuevosCampos) {
     `;
 
     await pool.query(sql, [...insertValues, ...updateValues]);
-  } catch (error) {}
+  } catch (error) {
+    console.error('❌ Error actualizando conversacion en DB:', error.message);
+  }
+  return actualizado;
 }
 
 /**
@@ -195,6 +198,8 @@ async function guardarLead(telefonoManual, nombreCompleto, gradoId, gradoTexto) 
     const apellido = partes.slice(1).join(' ') || '';
     const cleanTel = (telefonoManual || 'Sin número').toString().trim();
 
+    console.log(`💾 INSERTANDO LEAD EN MYSQL -> Teléfono: ${cleanTel}, Nombre: ${nombre} ${apellido}, Grado: ${gradoTexto}`);
+
     await pool.query(
       `INSERT INTO leads_fase2 (telefono, nombre_contacto, apellido_contacto, grado_interes_id, habeas_data_aceptado, puntaje)
        VALUES (?, ?, ?, ?, TRUE, ?)
@@ -209,7 +214,7 @@ async function guardarLead(telefonoManual, nombreCompleto, gradoId, gradoTexto) 
       [cleanTel, nombre, apellido, gradoTexto || 'Grado no especificado', nombre, apellido, gradoTexto || 'Grado no especificado']
     );
 
-    console.log(`✅ Lead registrado exitosamente en MySQL con scoring ${puntaje} para ${nombreCompleto} (Teléfono Manual: ${cleanTel})`);
+    console.log(`✅ Lead registrado exitosamente en MySQL con scoring ${puntaje} para ${nombreCompleto} (${cleanTel})`);
   } catch (error) {
     console.error('❌ Error al guardar lead en MySQL:', error.message);
   }
@@ -287,7 +292,7 @@ async function procesarMensaje(sessionId, mensajeTexto) {
     return;
   }
 
-  const estado = await obtenerEstadoConversacion(sessionId);
+  let estado = await obtenerEstadoConversacion(sessionId);
 
   switch (estado.paso_actual) {
     case 'inicio': {
@@ -313,7 +318,7 @@ async function procesarMensaje(sessionId, mensajeTexto) {
       }
 
       // Guardar Nombre y pasar al paso explícito de Número Telefónico de Contacto
-      await actualizarConversacion(sessionId, {
+      estado = await actualizarConversacion(sessionId, {
         nombre_temp: textoLimpio,
         paso_actual: 'telefono'
       });
@@ -342,7 +347,7 @@ async function procesarMensaje(sessionId, mensajeTexto) {
       }
 
       // Guardar el número ingresado manualmente por el usuario y pasar a los Grados de MySQL
-      await actualizarConversacion(sessionId, {
+      estado = await actualizarConversacion(sessionId, {
         telefono_temp: textoLimpio,
         paso_actual: 'programa'
       });
@@ -373,18 +378,12 @@ async function procesarMensaje(sessionId, mensajeTexto) {
 
       // 3. Grado válido seleccionado
       if (gradoSeleccionadoText) {
-        const nuevoEstado = {
-          ...estado,
-          programa_temp: gradoSeleccionadoText,
-          paso_actual: 'confirmacion_final',
-        };
-
-        await actualizarConversacion(sessionId, {
+        estado = await actualizarConversacion(sessionId, {
           programa_temp: gradoSeleccionadoText,
           paso_actual: 'confirmacion_final',
         });
 
-        await enviarRecuentoGeneralFinal(sessionId, nuevoEstado);
+        await enviarRecuentoGeneralFinal(sessionId, estado);
         return;
       }
 
@@ -410,10 +409,14 @@ async function procesarMensaje(sessionId, mensajeTexto) {
       const esOpUno = primerCaracter === '1' || textoNorm.includes('si') || textoNorm.includes('confirmar') || textoNorm.includes('ok') || textoNorm.includes('inscribirme');
       const esOpDos = primerCaracter === '2' || textoNorm.includes('no') || textoNorm.includes('reiniciar') || textoNorm.includes('corregir');
 
+      console.log(`📋 PROCESANDO CONFIRMACION FINAL (Paso 4): esOpUno=${esOpUno}, esOpDos=${esOpDos}, texto="${textoNorm}"`);
+
       if (esOpUno) {
         const nombreFinal = estado.nombre_temp || 'Interesado';
-        const telManualFinal = estado.telefono_temp || 'Sin número';
+        const telManualFinal = estado.telefono_temp || sessionId.replace(/[^\d]/g, '') || 'Sin número';
         const gradoFinal = estado.programa_temp || 'Sin grado';
+
+        console.log(`🎯 GUARDANDO LEAD EN PASO 4 -> Nombre: ${nombreFinal}, Teléfono: ${telManualFinal}, Grado: ${gradoFinal}`);
 
         const gradosDisponibles = await obtenerGradosDinamicos();
         const gradoEncontrado = gradosDisponibles.find((g) => g.nombre.toLowerCase() === gradoFinal.toLowerCase());
