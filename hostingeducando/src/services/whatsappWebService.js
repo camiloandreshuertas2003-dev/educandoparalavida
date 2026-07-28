@@ -149,9 +149,9 @@ async function initWhatsAppWeb() {
       }
     });
 
-    // Escuchar notificaciones de mensajes entrantes de clientes
+    // Escuchar únicamente notificaciones en vivo de mensajes entrantes de clientes
     sock.ev.on('messages.upsert', async (m) => {
-      if (!m || !m.messages || m.messages.length === 0) return;
+      if (!m || m.type !== 'notify' || !m.messages || m.messages.length === 0) return;
 
       for (const msg of m.messages) {
         if (!msg.message) continue;
@@ -250,8 +250,15 @@ async function logoutWhatsAppWeb() {
 }
 
 async function enviarMensajeWWeb(telefono, mensaje) {
-  if (!isWhatsAppWebReady()) {
-    throw new Error('WhatsApp Web no está listo o conectado');
+  // Esperar hasta 5 segundos si el socket está reconectando tras escanear el QR
+  let retries = 0;
+  while ((!sock || clientStatus !== 'ready') && retries < 10) {
+    await new Promise((res) => setTimeout(res, 500));
+    retries++;
+  }
+
+  if (!sock) {
+    throw new Error('WhatsApp Web no está listo (el socket está desconectado)');
   }
 
   const cleanPhone = telefono.toString().replace(/[^\d]/g, '');
@@ -283,6 +290,7 @@ async function enviarMensajeWWeb(telefono, mensaje) {
       if (result && result.key && result.key.id) {
         botSentMsgIds.add(result.key.id);
       }
+      console.log(`📤 [WhatsApp Web Baileys] Mensaje enviado exitosamente vía fallback a ${cleanPhone}`);
       return result;
     } catch (e2) {
       console.error(`❌ Error definitivo enviando mensaje a ${cleanPhone}:`, e2.message);
