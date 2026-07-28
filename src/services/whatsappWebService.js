@@ -26,7 +26,7 @@ function normalizarTelefonoCliente(msg) {
   const participant = msg.key.participant || '';
   const remoteJidAlt = msg.key.remoteJidAlt || '';
 
-  // 1. Buscar JID que termine en @s.whatsapp.net (teléfono real)
+  // 1. Buscar JID que termine en @s.whatsapp.net (teléfono real de WhatsApp)
   const phoneJid = [remoteJidAlt, participant, remoteJid].find(j => j && j.includes('@s.whatsapp.net'));
   
   if (phoneJid) {
@@ -36,7 +36,7 @@ function normalizarTelefonoCliente(msg) {
         const lidClean = remoteJid.split('@')[0];
         lidToPhoneMap.set(lidClean, cleanPhone);
       }
-      contactJidMap.set(cleanPhone, remoteJid);
+      contactJidMap.set(cleanPhone, `${cleanPhone}@s.whatsapp.net`);
       return cleanPhone;
     }
   }
@@ -47,11 +47,12 @@ function normalizarTelefonoCliente(msg) {
   // 3. Si es un LID mapeado previamente a un teléfono real
   if (lidToPhoneMap.has(rawId)) {
     const realTel = lidToPhoneMap.get(rawId);
-    contactJidMap.set(realTel, remoteJid);
+    contactJidMap.set(realTel, `${realTel}@s.whatsapp.net`);
     return realTel;
   }
 
-  contactJidMap.set(rawId, remoteJid);
+  const defaultJid = rawId.length <= 13 ? `${rawId}@s.whatsapp.net` : remoteJid;
+  contactJidMap.set(rawId, defaultJid);
   return rawId;
 }
 
@@ -256,15 +257,16 @@ async function enviarMensajeWWeb(telefono, mensaje) {
   const cleanPhone = telefono.toString().replace(/[^\d]/g, '');
   let targetJid = contactJidMap.get(cleanPhone) || contactJidMap.get(telefono);
 
-  if (!targetJid) {
-    if (cleanPhone.length > 13) {
-      targetJid = `${cleanPhone}@lid`;
+  if (!targetJid || targetJid.includes('@lid')) {
+    if (cleanPhone.length > 13 && lidToPhoneMap.has(cleanPhone)) {
+      const realTel = lidToPhoneMap.get(cleanPhone);
+      targetJid = `${realTel}@s.whatsapp.net`;
     } else {
       targetJid = `${cleanPhone}@s.whatsapp.net`;
     }
   }
 
-  console.log(`📤 [WhatsApp Web Baileys] Enviando mensaje a ${cleanPhone} (${targetJid})...`);
+  console.log(`📤 [WhatsApp Web Baileys] Enviando mensaje a ${cleanPhone} (JID: ${targetJid})...`);
 
   try {
     const result = await sock.sendMessage(targetJid, { text: mensaje });
@@ -274,8 +276,18 @@ async function enviarMensajeWWeb(telefono, mensaje) {
     console.log(`📤 [WhatsApp Web Baileys] Mensaje enviado exitosamente a ${cleanPhone}`);
     return result;
   } catch (err) {
-    console.error(`❌ Error enviando mensaje a ${cleanPhone}:`, err.message);
-    throw err;
+    console.warn(`⚠️ Error enviando a ${targetJid}, intentando fallback a @s.whatsapp.net:`, err.message);
+    const fallbackJid = `${cleanPhone}@s.whatsapp.net`;
+    try {
+      const result = await sock.sendMessage(fallbackJid, { text: mensaje });
+      if (result && result.key && result.key.id) {
+        botSentMsgIds.add(result.key.id);
+      }
+      return result;
+    } catch (e2) {
+      console.error(`❌ Error definitivo enviando mensaje a ${cleanPhone}:`, e2.message);
+      throw e2;
+    }
   }
 }
 
