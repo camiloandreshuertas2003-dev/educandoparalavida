@@ -93,8 +93,8 @@ app.get('/admin', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/index.html'));
 });
 
-// Para ejecución local o en servidor VPS (Contabo / cPanel)
-if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
+// Iniciar servidor HTTP siempre (Render, Railway, VPS, Local) salvo Vercel Serverless
+if (!process.env.VERCEL) {
   app.listen(PORT, () => {
     console.log(`===================================================`);
     console.log(` Servidor Bot & Panel Admin corriendo en el puerto ${PORT}`);
@@ -113,5 +113,5 @@ if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
   });
 }
 
-// Exportar para Vercel / cPanel Serverless / Passenger
+// Exportar para Vercel Serverless
 module.exports = app;
