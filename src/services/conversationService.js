@@ -257,28 +257,7 @@ async function resetearConversacionLimpia(sessionId) {
 }
 
 /**
- * Enviar tarjeta de recuento general final utilizando el teléfono manual ingresado
- */
-async function enviarRecuentoGeneralFinal(sessionId, estado) {
-  const nombreComp = estado.nombre_temp || 'No especificado';
-  const telManual = estado.telefono_temp || 'No especificado';
-  const progComp = estado.programa_temp || 'No especificado';
-
-  const recuento = `📋 *Recuento General de su Registro* ✨\n\n` +
-    `Por favor verifique si la información registrada es correcta:\n\n` +
-    `👤 *Nombre y Apellidos:* ${nombreComp}\n` +
-    `📲 *Teléfono de Contacto:* ${telManual}\n` +
-    `🎓 *Grado Educativo:* ${progComp}\n\n` +
-    `Responda enviando el número de su opción:\n` +
-    `1️⃣ *1.* Sí, confirmar e inscribirme ✅\n` +
-    `2️⃣ *2.* No, reiniciar para corregir datos 🔄`;
-
-  await enviarTexto(sessionId, recuento);
-  await registrarLog(sessionId, 'saliente', recuento);
-}
-
-/**
- * Procesar mensaje NLU con paso explícito para ingresar el número telefónico manualmente
+ * Procesar mensaje NLU directo sin paso de recuento: Nombre -> Teléfono -> Grado -> Guardado Automático
  */
 async function procesarMensaje(sessionId, mensajeTexto) {
   const textoLimpio = mensajeTexto ? mensajeTexto.trim() : '';
@@ -317,7 +296,7 @@ async function procesarMensaje(sessionId, mensajeTexto) {
         return;
       }
 
-      // Guardar Nombre y pasar al paso explícito de Número Telefónico de Contacto
+      // Guardar Nombre y solicitar número telefónico de contacto
       estado = await actualizarConversacion(sessionId, {
         nombre_temp: textoLimpio,
         paso_actual: 'telefono'
@@ -337,7 +316,7 @@ async function procesarMensaje(sessionId, mensajeTexto) {
         return;
       }
 
-      // Si el cliente pregunta una FAQ en lugar de escribir su número
+      // Responder FAQ si aplica
       const respuestaFaq = await buscarEnBaseConocimiento(textoLimpio);
       if (respuestaFaq) {
         const msgFaq = `${respuestaFaq}\n\n📱 Para continuar, por favor escriba su *Número de Teléfono / Celular de Contacto* (Ejemplo: 3218423914):`;
@@ -346,7 +325,7 @@ async function procesarMensaje(sessionId, mensajeTexto) {
         return;
       }
 
-      // Guardar el número ingresado manualmente por el usuario y pasar a los Grados de MySQL
+      // Guardar el número ingresado manualmente y enviar el menú de Grados
       estado = await actualizarConversacion(sessionId, {
         telefono_temp: textoLimpio,
         paso_actual: 'programa'
@@ -376,14 +355,37 @@ async function procesarMensaje(sessionId, mensajeTexto) {
         }
       }
 
-      // 3. Grado válido seleccionado
+      // 3. SI EL USUARIO SELECCIONA UN GRADO VÁLIDO -> GUARDADO DIRECTO AUTOMÁTICO EN MYSQL Y CRM
       if (gradoSeleccionadoText) {
-        estado = await actualizarConversacion(sessionId, {
+        const nombreFinal = estado.nombre_temp || 'Interesado';
+        const telManualFinal = estado.telefono_temp || sessionId.replace(/[^\d]/g, '') || 'Sin número';
+        const gradoFinal = gradoSeleccionadoText;
+
+        const gradoEncontrado = gradosDisponibles.find((g) => g.nombre.toLowerCase() === gradoFinal.toLowerCase());
+        const gradoId = gradoEncontrado ? gradoEncontrado.id : null;
+
+        // A. Marcar conversación como finalizada en MySQL y Memoria
+        await actualizarConversacion(sessionId, {
           programa_temp: gradoSeleccionadoText,
-          paso_actual: 'confirmacion_final',
+          paso_actual: 'finalizado'
         });
 
-        await enviarRecuentoGeneralFinal(sessionId, estado);
+        // B. Guardar de inmediato el Lead en MySQL (`leads_fase2` y `leads`)
+        try {
+          await guardarLead(telManualFinal, nombreFinal, gradoId, gradoFinal);
+        } catch (e) {
+          console.error('Error guardando lead:', e.message);
+        }
+
+        // C. Enviar mensaje final de agradecimiento e inscripción oficial
+        const confirmacionBase = await obtenerTextoBot(
+          'despedida',
+          `🎉 ¡Muchas gracias, ${nombreFinal}! ✨ Hemos registrado exitosamente su inscripción para el programa: *${gradoFinal}* 🎓. Un asesor académico de admisiones se comunicará con usted al teléfono *${telManualFinal}* 📲.`
+        );
+
+        const confirmacionFinal = `${confirmacionBase}\n\n(Escriba *REINICIAR* en cualquier momento si desea realizar otra solicitud) 🌟.`;
+        await enviarTexto(sessionId, confirmacionFinal);
+        await registrarLog(sessionId, 'saliente', confirmacionFinal);
         return;
       }
 
@@ -401,58 +403,6 @@ async function procesarMensaje(sessionId, mensajeTexto) {
       await enviarTexto(sessionId, msgError);
       await registrarLog(sessionId, 'saliente', msgError);
       await enviarListaGrados(sessionId);
-      break;
-    }
-
-    case 'confirmacion_final': {
-      const primerCaracter = textoNorm.charAt(0);
-      const esOpUno = primerCaracter === '1' || textoNorm.includes('si') || textoNorm.includes('confirmar') || textoNorm.includes('ok') || textoNorm.includes('inscribirme');
-      const esOpDos = primerCaracter === '2' || textoNorm.includes('no') || textoNorm.includes('reiniciar') || textoNorm.includes('corregir');
-
-      console.log(`📋 PROCESANDO CONFIRMACION FINAL (Paso 4): esOpUno=${esOpUno}, esOpDos=${esOpDos}, texto="${textoNorm}"`);
-
-      if (esOpUno) {
-        const nombreFinal = estado.nombre_temp || 'Interesado';
-        const telManualFinal = estado.telefono_temp || sessionId.replace(/[^\d]/g, '') || 'Sin número';
-        const gradoFinal = estado.programa_temp || 'Sin grado';
-
-        console.log(`🎯 GUARDANDO LEAD EN PASO 4 -> Nombre: ${nombreFinal}, Teléfono: ${telManualFinal}, Grado: ${gradoFinal}`);
-
-        const gradosDisponibles = await obtenerGradosDinamicos();
-        const gradoEncontrado = gradosDisponibles.find((g) => g.nombre.toLowerCase() === gradoFinal.toLowerCase());
-        const gradoId = gradoEncontrado ? gradoEncontrado.id : null;
-
-        // 1. Marcar conversación como finalizada
-        await actualizarConversacion(sessionId, { paso_actual: 'finalizado' });
-
-        // 2. Guardar Lead en MySQL con el teléfono manual escrito por el usuario
-        try {
-          await guardarLead(telManualFinal, nombreFinal, gradoId, gradoFinal);
-        } catch (e) {
-          console.error('Error guardando lead:', e.message);
-        }
-
-        // 3. Enviar mensaje de confirmación final
-        const confirmacionBase = await obtenerTextoBot(
-          'despedida',
-          `🎉 ¡Muchas gracias, ${nombreFinal}! ✨ Hemos registrado exitosamente su inscripción para el programa: *${gradoFinal}* 🎓. Un asesor académico de admisiones se comunicará con usted al teléfono *${telManualFinal}* 📲.`
-        );
-
-        const confirmacionFinal = `${confirmacionBase}\n\n(Escriba *REINICIAR* en cualquier momento si desea realizar otra solicitud) 🌟.`;
-        await enviarTexto(sessionId, confirmacionFinal);
-        await registrarLog(sessionId, 'saliente', confirmacionFinal);
-        return;
-      } else if (esOpDos) {
-        await resetearConversacionLimpia(sessionId);
-        return;
-      } else {
-        const respuestaFaq = await buscarEnBaseConocimiento(textoLimpio);
-        if (respuestaFaq) {
-          await enviarTexto(sessionId, respuestaFaq);
-          await registrarLog(sessionId, 'saliente', respuestaFaq);
-        }
-        await enviarRecuentoGeneralFinal(sessionId, estado);
-      }
       break;
     }
 

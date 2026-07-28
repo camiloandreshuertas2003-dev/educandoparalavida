@@ -211,8 +211,11 @@ function getWWebStatus() {
       initWhatsAppWeb();
     } catch (e) {}
   }
+
+  const isReady = isWhatsAppWebReady();
+
   return {
-    status: clientStatus,
+    status: isReady ? 'ready' : clientStatus,
     hasQr: !!currentQrDataUri,
     qrDataUri: currentQrDataUri,
     userProfile
@@ -220,7 +223,7 @@ function getWWebStatus() {
 }
 
 function isWhatsAppWebReady() {
-  return clientStatus === 'ready' && sock !== null;
+  return sock !== null && (clientStatus === 'ready' || !!(sock && sock.user && sock.user.id));
 }
 
 async function logoutWhatsAppWeb() {
@@ -251,9 +254,9 @@ async function logoutWhatsAppWeb() {
 }
 
 async function enviarMensajeWWeb(telefono, mensaje) {
-  // Esperar hasta 5 segundos si el socket está reconectando tras escanear el QR
+  // Esperar hasta 5 segundos si el socket se está estabilizando
   let retries = 0;
-  while ((!sock || clientStatus !== 'ready') && retries < 10) {
+  while (!isWhatsAppWebReady() && retries < 10) {
     await new Promise((res) => setTimeout(res, 500));
     retries++;
   }
