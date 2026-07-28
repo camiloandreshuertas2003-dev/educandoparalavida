@@ -19,14 +19,14 @@ const lidToPhoneMap = new Map();
 const authFolder = path.join(__dirname, '../../.baileys_auth');
 
 /**
- * Resolver telefono real evitando descalces entre LIDs e identificadores de usuario
+ * Resolver teléfono real unificado evitando descalces entre LIDs e identificadores de usuario
  */
 function normalizarTelefonoCliente(msg) {
   const remoteJid = msg.key.remoteJid || '';
   const participant = msg.key.participant || '';
   const remoteJidAlt = msg.key.remoteJidAlt || '';
 
-  // 1. Buscar JID que termine en @s.whatsapp.net (telefono real)
+  // 1. Buscar JID que termine en @s.whatsapp.net (teléfono real)
   const phoneJid = [remoteJidAlt, participant, remoteJid].find(j => j && j.includes('@s.whatsapp.net'));
   
   if (phoneJid) {
@@ -44,7 +44,7 @@ function normalizarTelefonoCliente(msg) {
   // 2. Extraer del remoteJid principal
   const rawId = remoteJid.split('@')[0].split(':')[0].replace(/[^\d]/g, '');
   
-  // 3. Si es un LID mapeado previamente a un telefono real
+  // 3. Si es un LID mapeado previamente a un teléfono real
   if (lidToPhoneMap.has(rawId)) {
     const realTel = lidToPhoneMap.get(rawId);
     contactJidMap.set(realTel, remoteJid);
@@ -123,33 +123,34 @@ async function initWhatsAppWeb() {
 
       if (connection === 'close') {
         const statusCode = lastDisconnect?.error?.output?.statusCode;
-        const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-        console.warn(`⚠️ Conexión de WhatsApp cerrada (Código ${statusCode}). Reorganizando: ${shouldReconnect}`);
+        const isLoggedOut = statusCode === DisconnectReason.loggedOut;
 
-        clientStatus = 'disconnected';
+        console.warn(`⚠️ Conexión de WhatsApp cerrada (Código ${statusCode}). Reorganizando sesión...`);
+
         currentQrCode = null;
         currentQrDataUri = null;
         sock = null;
 
-        if (statusCode === DisconnectReason.loggedOut) {
+        if (isLoggedOut) {
+          clientStatus = 'disconnected';
+          userProfile = null;
           try {
             if (fs.existsSync(authFolder)) {
               fs.rmSync(authFolder, { recursive: true, force: true });
             }
           } catch (e) {}
-        }
-
-        if (shouldReconnect) {
-          setTimeout(() => {
-            initWhatsAppWeb();
-          }, 3000);
+          setTimeout(() => initWhatsAppWeb(), 2000);
+        } else {
+          // Código 515 (restartRequired) o reconexión de red normal: Reconectar de inmediato
+          clientStatus = 'initializing';
+          setTimeout(() => initWhatsAppWeb(), 1000);
         }
       }
     });
 
     // Escuchar notificaciones de mensajes entrantes de clientes
     sock.ev.on('messages.upsert', async (m) => {
-      if (!m || m.type !== 'notify' || !m.messages || m.messages.length === 0) return;
+      if (!m || !m.messages || m.messages.length === 0) return;
 
       for (const msg of m.messages) {
         if (!msg.message) continue;
