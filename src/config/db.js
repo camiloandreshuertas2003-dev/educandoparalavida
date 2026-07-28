@@ -5,7 +5,6 @@ let poolConfig = {};
 
 function getIndividualConfig() {
   let user = process.env.DB_USER || 'ki11745159_educandoparalavida1';
-  // Si el usuario ingresado no termina en 1, asegurar que use ki11745159_educandoparalavida1 para Contabo
   if (user === 'ki11745159_educandoparalavida') {
     user = 'ki11745159_educandoparalavida1';
   }
@@ -20,6 +19,7 @@ function getIndividualConfig() {
     connectionLimit: 5,
     queueLimit: 0,
     connectTimeout: 5000,
+    charset: 'utf8mb4',
   };
 }
 
@@ -36,6 +36,7 @@ if (process.env.DATABASE_URL) {
       connectionLimit: 5,
       queueLimit: 0,
       connectTimeout: 5000,
+      charset: 'utf8mb4',
     };
   } catch (err) {
     console.error('Error parseando DATABASE_URL:', err.message);

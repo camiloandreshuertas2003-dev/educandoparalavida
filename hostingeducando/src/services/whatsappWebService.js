@@ -21,15 +21,68 @@ function initWhatsAppWeb() {
   console.log('⚡ Inicializando cliente WhatsApp Web (QR Mode)...');
   clientStatus = 'initializing';
 
-  let executablePath;
+  let executablePath = null;
+
+  // 1. Probar la ruta predeterminada de Puppeteer solo si el archivo existe en disco
   try {
     const puppeteer = require('puppeteer');
     if (puppeteer && typeof puppeteer.executablePath === 'function') {
-      executablePath = puppeteer.executablePath();
-      console.log('🌐 Usando binario de Chrome para Puppeteer en:', executablePath);
+      const pPath = puppeteer.executablePath();
+      if (pPath && fs.existsSync(pPath)) {
+        executablePath = pPath;
+        console.log('🌐 Usando binario verificado de Chrome en:', executablePath);
+      }
     }
-  } catch (e) {
-    console.warn('⚠️ Nota obteniendo executablePath de puppeteer:', e.message);
+  } catch (e) {}
+
+  // 2. Si la ruta por defecto no existe en el contenedor de Render, buscar en rutas Linux y cache local
+  if (!executablePath) {
+    const systemPaths = [
+      '/usr/bin/google-chrome',
+      '/usr/bin/google-chrome-stable',
+      '/usr/bin/chromium-browser',
+      '/usr/bin/chromium',
+      path.join(process.cwd(), '.cache/puppeteer')
+    ];
+
+    for (const sysPath of systemPaths) {
+      try {
+        if (fs.existsSync(sysPath)) {
+          if (fs.statSync(sysPath).isDirectory()) {
+            const findChrome = (dir) => {
+              try {
+                const files = fs.readdirSync(dir);
+                for (const file of files) {
+                  const fullPath = path.join(dir, file);
+                  const stat = fs.statSync(fullPath);
+                  if (stat.isDirectory()) {
+                    const found = findChrome(fullPath);
+                    if (found) return found;
+                  } else if (file === 'chrome' && !fullPath.includes('.so')) {
+                    return fullPath;
+                  }
+                }
+              } catch (e) {}
+              return null;
+            };
+            const found = findChrome(sysPath);
+            if (found) {
+              executablePath = found;
+              break;
+            }
+          } else {
+            executablePath = sysPath;
+            break;
+          }
+        }
+      } catch (e) {}
+    }
+  }
+
+  if (executablePath) {
+    console.log('🌐 Ejecutable final de Chrome validado:', executablePath);
+  } else {
+    console.log('🌐 Usando resolución automática del navegador Puppeteer (sin executablePath forzado)');
   }
 
   const puppeteerArgs = [
