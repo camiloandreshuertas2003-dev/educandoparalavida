@@ -48,6 +48,7 @@ async function obtenerTextoBot(clave, fallbackDefault) {
 
 /**
  * Buscar respuestas dinámicas NLU en la tabla `base_conocimiento` (FAQs) de MySQL
+ * Tolerante a variaciones de palabras sin necesidad de signos de interrogación (?)
  */
 async function buscarEnBaseConocimiento(mensajeTexto) {
   if (!mensajeTexto) return null;
@@ -56,18 +57,54 @@ async function buscarEnBaseConocimiento(mensajeTexto) {
   try {
     const [faqs] = await pool.query('SELECT pregunta_frecuente, respuesta_aprobada FROM base_conocimiento WHERE activo = TRUE');
     if (faqs && faqs.length > 0) {
+      let mejorCoincidencia = null;
+      let maxScore = 0;
+
       for (const faq of faqs) {
         const pregNorm = normalizarTexto(faq.pregunta_frecuente);
-        const keywords = pregNorm.split(/\s+/).filter(w => w.length > 3);
-        const matchCount = keywords.filter(k => textoNorm.includes(k)).length;
+        const palabrasPregunta = pregNorm.split(/\s+/).filter(w => w.length > 2);
 
-        if (matchCount >= 1 ||
-            (textoNorm.includes('precio') && (pregNorm.includes('precio') || pregNorm.includes('costo'))) ||
-            (textoNorm.includes('vivo') && (pregNorm.includes('vivo') || pregNorm.includes('clase') || pregNorm.includes('horario'))) ||
-            (textoNorm.includes('titulo') && (pregNorm.includes('titulo') || pregNorm.includes('oficial') || pregNorm.includes('valido'))) ||
-            (textoNorm.includes('requisito') && (pregNorm.includes('requisito') || pregNorm.includes('documento')))) {
-          return faq.respuesta_aprobada;
+        let score = 0;
+        palabrasPregunta.forEach(palabra => {
+          if (textoNorm.includes(palabra)) {
+            score += 2;
+          }
+        });
+
+        // Coincidencias temáticas por sinonimia
+        if ((textoNorm.includes('precio') || textoNorm.includes('costo') || textoNorm.includes('cuanto') || textoNorm.includes('pago') || textoNorm.includes('valor')) && 
+            (pregNorm.includes('precio') || pregNorm.includes('costo') || pregNorm.includes('pension'))) {
+          score += 5;
         }
+
+        if ((textoNorm.includes('vivo') || textoNorm.includes('clase') || textoNorm.includes('horario') || textoNorm.includes('jornada')) && 
+            (pregNorm.includes('vivo') || pregNorm.includes('clase') || pregNorm.includes('horario') || pregNorm.includes('metodologia'))) {
+          score += 5;
+        }
+
+        if ((textoNorm.includes('titulo') || textoNorm.includes('oficial') || textoNorm.includes('valido') || textoNorm.includes('icfes') || textoNorm.includes('men') || textoNorm.includes('diploma')) && 
+            (pregNorm.includes('titulo') || pregNorm.includes('oficial') || pregNorm.includes('valido') || pregNorm.includes('icfes'))) {
+          score += 5;
+        }
+
+        if ((textoNorm.includes('requisito') || textoNorm.includes('documento') || textoNorm.includes('papel') || textoNorm.includes('matricula')) && 
+            (pregNorm.includes('requisito') || pregNorm.includes('documento') || pregNorm.includes('matricula'))) {
+          score += 5;
+        }
+
+        if ((textoNorm.includes('ubicacion') || textoNorm.includes('donde') || textoNorm.includes('sede') || textoNorm.includes('ciudad')) && 
+            (pregNorm.includes('ubicacion') || pregNorm.includes('sede') || pregNorm.includes('donde'))) {
+          score += 5;
+        }
+
+        if (score > maxScore && score >= 2) {
+          maxScore = score;
+          mejorCoincidencia = faq.respuesta_aprobada;
+        }
+      }
+
+      if (mejorCoincidencia) {
+        return mejorCoincidencia;
       }
     }
   } catch (err) {
@@ -79,7 +116,7 @@ async function buscarEnBaseConocimiento(mensajeTexto) {
     return '💡 En el Colegio Virtual Educando para la Vida 🎓 los costos son muy accesibles. Ofrecemos mensualidades económicas con facilidades de pago 💸. Al registrar sus datos, le enviaremos la tarifa exacta para su grado 📚.';
   }
   if (textoNorm.includes('vivo')) {
-    return '💻 Ofrecemos un modelo flexible 100% virtual con plataforma 24/7, clases en vivo interactivas 🎥 y tutorías personalizadas para aprender a su propio ritmo ✨.';
+    return '💻 Ofrecemos un modelo flexible 100% virtual con plataforma disponible 24/7, clases en vivo interactivas 🎥 y tutorías personalizadas para aprender a su propio ritmo ✨.';
   }
   if (textoNorm.includes('titulo')) {
     return '📜 Contamos con resolución oficial expedida por la Secretaría de Educación conforme a la Ley 115. El título de Bachiller es 100% legal y válido para ingresar a cualquier universidad 🏛️✨.';
@@ -116,7 +153,12 @@ async function obtenerGradosDinamicos() {
  */
 async function enviarListaGrados(sessionId) {
   const grados = await obtenerGradosDinamicos();
-  let msg = '🎓 Seleccione el *Grado Educativo* de su interés enviando el número correspondiente 👇:\n\n';
+  const tituloGrados = await obtenerTextoBot(
+    'seleccion_grado',
+    '🎓 Seleccione el *Grado Educativo* de su interés enviando el número correspondiente 👇:'
+  );
+
+  let msg = `${tituloGrados}\n\n`;
   grados.forEach((g, idx) => {
     msg += `${idx + 1}. ${g.nombre}\n`;
   });
@@ -235,7 +277,7 @@ async function registrarLog(sessionId, direccion, contenido) {
 }
 
 /**
- * Resetear conversación limpia desde 0
+ * Resetear conversación limpia desde 0 usando mensaje administrable en MySQL
  */
 async function resetearConversacionLimpia(sessionId) {
   estadosEnMemoria.delete(sessionId);
@@ -245,7 +287,7 @@ async function resetearConversacionLimpia(sessionId) {
 
   const bienvenidaBD = await obtenerTextoBot(
     'bienvenida',
-    '👋 ¡Hola! Bienvenido al Colegio Virtual Educando para la Vida 🎓✨. Somos una institución educativa 100% autorizada 📚.\n\nPara iniciar su registro, ¿cuál es su *Nombre Completo* (Nombres y Apellidos)? ✍️'
+    '👋 ¡Hola! Bienvenido al Colegio Virtual Educando para la Vida 🎓✨. Somos una institución educativa 100% autorizada por la Secretaría de Educación 📚.\n\nPara iniciar su registro, ¿cuál es su *Nombre Completo* (Nombres y Apellidos)? ✍️'
   );
 
   await enviarTexto(sessionId, bienvenidaBD);
@@ -259,7 +301,7 @@ async function resetearConversacionLimpia(sessionId) {
 }
 
 /**
- * Procesar mensaje NLU inteligente conectado a la Base de Conocimiento y Maquina de Estados de MySQL
+ * Procesar mensaje NLU directo utilizando únicamente los mensajes de la tabla `bot_mensajes` y `base_conocimiento`
  */
 async function procesarMensaje(sessionId, mensajeTexto) {
   const textoLimpio = mensajeTexto ? mensajeTexto.trim() : '';
@@ -298,13 +340,16 @@ async function procesarMensaje(sessionId, mensajeTexto) {
         return;
       }
 
-      // Guardar Nombre y solicitar número telefónico de contacto
+      // Guardar Nombre y solicitar número telefónico usando el paso 2 administrable en MySQL
       estado = await actualizarConversacion(sessionId, {
         nombre_temp: textoLimpio,
         paso_actual: 'telefono'
       });
 
-      const msgTel = `📱 Por favor escriba su *Número de Teléfono / Celular de Contacto* para enviarle la información oficial (Ejemplo: 3218423914): ✍️`;
+      const msgTel = await obtenerTextoBot(
+        'solicitar_telefono',
+        '📱 Por favor escriba su *Número de Teléfono / Celular de Contacto* para enviarle la información oficial (Ejemplo: 3218423914): ✍️'
+      );
       await enviarTexto(sessionId, msgTel);
       await registrarLog(sessionId, 'saliente', msgTel);
       break;
@@ -379,7 +424,7 @@ async function procesarMensaje(sessionId, mensajeTexto) {
           console.error('Error guardando lead:', e.message);
         }
 
-        // C. Enviar mensaje final de agradecimiento e inscripción oficial desde MySQL
+        // C. Enviar mensaje final de agradecimiento e inscripción oficial administrable desde MySQL
         const confirmacionBase = await obtenerTextoBot(
           'despedida',
           `🎉 ¡Muchas gracias, ${nombreFinal}! ✨ Hemos registrado exitosamente su inscripción para el programa: *${gradoFinal}* 🎓. Un asesor académico de admisiones se comunicará con usted al teléfono *${telManualFinal}* 📲.`
