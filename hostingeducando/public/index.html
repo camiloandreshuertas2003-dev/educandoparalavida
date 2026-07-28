@@ -310,6 +310,9 @@
           <li class="nav-item" onclick="switchTab('leads', this)">
             <svg class="icon"><use href="#icon-users"/></svg> Prospectos
           </li>
+          <li class="nav-item" onclick="switchTab('whatsapp', this)">
+            <svg class="icon"><use href="#icon-phone"/></svg> WhatsApp QR
+          </li>
           <li class="nav-item" onclick="switchTab('grados', this)">
             <svg class="icon"><use href="#icon-book"/></svg> Oferta Académica
           </li>
@@ -427,7 +430,36 @@
         </div>
       </section>
 
-      <!-- Tab 4: Oferta Académica (Grados & Paquetes) -->
+      <!-- Tab 4: Conexión y Código QR de WhatsApp Web -->
+      <section id="tab-whatsapp" style="display: none;">
+        <div class="table-container" style="text-align: center; max-width: 580px; margin: 0 auto;">
+          <h3 style="font-weight: 700; margin-bottom: 8px;">📱 Estado de Conexión WhatsApp Web</h3>
+          <p style="color: var(--color-muted); font-size: 0.9rem; margin-bottom: 20px;">Vincule y gestione la sesión activa de su número institucional de WhatsApp en tiempo real.</p>
+
+          <div id="panelWappBadge" class="badge-tab" style="font-size: 1rem; padding: 8px 20px; border-radius: 20px; margin-bottom: 20px;">Cargando estado...</div>
+
+          <div id="panelQrBox" style="background: #FFFFFF; border: 1px solid var(--color-border); border-radius: 12px; padding: 20px; display: inline-flex; align-items: center; justify-content: center; min-width: 260px; min-height: 260px; margin-bottom: 20px;">
+            <p style="color: var(--color-muted);">Cargando código QR...</p>
+          </div>
+
+          <div id="panelInstructions" style="text-align: left; background: var(--color-bg); padding: 16px 24px; border-radius: var(--radius-md); font-size: 0.9rem; color: var(--color-ink); margin-bottom: 20px;">
+            <strong>📋 Pasos para vincular su WhatsApp:</strong>
+            <ol style="margin-top: 8px; padding-left: 20px; line-height: 1.8;">
+              <li>Abre <strong>WhatsApp</strong> en tu celular (`3218423914`).</li>
+              <li>Toca en <strong>Menú (⋮)</strong> o <strong>Configuración (⚙️)</strong>.</li>
+              <li>Selecciona <strong>Dispositivos vinculados</strong> ➡️ <strong>Vincular un dispositivo</strong>.</li>
+              <li>Apunta la cámara hacia el Código QR mostrado en la pantalla.</li>
+            </ol>
+          </div>
+
+          <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;">
+            <button class="btn" onclick="initPanelWapp()">🔄 Generar / Reiniciar QR</button>
+            <button class="btn btn-danger" id="panelBtnLogout" onclick="logoutPanelWapp()" style="display: none;">🔴 Cerrar Sesión de WhatsApp</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Tab 5: Oferta Académica (Grados & Paquetes) -->
       <section id="tab-grados" style="display: none;">
         <div class="table-container">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
@@ -451,7 +483,7 @@
         </div>
       </section>
 
-      <!-- Tab 5: Base de Conocimiento (FAQs) -->
+      <!-- Tab 6: Base de Conocimiento (FAQs) -->
       <section id="tab-faqs" style="display: none;">
         <div class="table-container">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
@@ -475,7 +507,7 @@
         </div>
       </section>
 
-      <!-- Tab 6: Textos Administrables del Bot -->
+      <!-- Tab 7: Textos Administrables del Bot -->
       <section id="tab-bot" style="display: none;">
         <div class="table-container">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
@@ -515,9 +547,9 @@
       <svg class="icon"><use href="#icon-users"/></svg>
       <span>Leads</span>
     </div>
-    <div class="mobile-nav-item" onclick="switchTab('faqs', this)">
-      <svg class="icon"><use href="#icon-faq"/></svg>
-      <span>FAQs</span>
+    <div class="mobile-nav-item" onclick="switchTab('whatsapp', this)">
+      <svg class="icon"><use href="#icon-phone"/></svg>
+      <span>WhatsApp</span>
     </div>
   </div>
 
@@ -599,6 +631,7 @@
       const user = JSON.parse(localStorage.getItem('user') || '{}');
       document.getElementById('user-info').innerHTML = `<svg class="icon"><use href="#icon-users"/></svg> ${user.nombre || 'Administrador'}`;
       fetchDashboard();
+      checkPanelWappStatus();
     }
 
     function logout() {
@@ -616,6 +649,7 @@
       if (tabName === 'dashboard') fetchDashboard();
       if (tabName === 'kanban') fetchKanban();
       if (tabName === 'leads') fetchLeads();
+      if (tabName === 'whatsapp') checkPanelWappStatus();
       if (tabName === 'grados') fetchGrados();
       if (tabName === 'faqs') fetchFaqs();
       if (tabName === 'bot') fetchBot();
@@ -632,6 +666,63 @@
       }
       return res.json();
     }
+
+    async function checkPanelWappStatus() {
+      try {
+        const res = await fetch(getApiUrl('/api/admin/qr-status'));
+        const data = await res.json();
+        
+        const badge = document.getElementById('panelWappBadge');
+        const qrBox = document.getElementById('panelQrBox');
+        const btnLogout = document.getElementById('panelBtnLogout');
+
+        if (!badge || !qrBox) return;
+
+        if (data.status === 'ready') {
+          badge.className = 'badge-tab badge-matriculado';
+          badge.innerHTML = '🟢 Conectado 100% (+' + (data.userProfile?.phone || '') + ')';
+          qrBox.innerHTML = '<div style="color: var(--color-success); font-weight: 700; font-size: 1.1rem;">✨ ¡WhatsApp Vinculado con Éxito!<br><span style="font-size: 0.85rem; color: var(--color-muted);">Tu número está respondiendo automáticamente a tus clientes 24/7</span></div>';
+          if (btnLogout) btnLogout.style.display = 'inline-flex';
+        } else if (data.status === 'qr_ready' && data.qrDataUri) {
+          badge.className = 'badge-tab badge-contactado';
+          badge.innerHTML = '🟡 Listo para Escanear Código QR';
+          qrBox.innerHTML = '<img src="' + data.qrDataUri + '" style="width: 240px; height: 240px; display: block;" alt="WhatsApp QR" />';
+          if (btnLogout) btnLogout.style.display = 'none';
+        } else if (data.status === 'initializing') {
+          badge.className = 'badge-tab';
+          badge.innerHTML = '⏳ Inicializando navegador...';
+          qrBox.innerHTML = '<p style="color: var(--color-muted);">Abriendo sesión de WhatsApp Web...</p>';
+          if (btnLogout) btnLogout.style.display = 'none';
+        } else {
+          badge.className = 'badge-tab badge-descartado';
+          badge.innerHTML = '🔴 Desconectado';
+          qrBox.innerHTML = '<p style="color: var(--color-muted);">Presiona "Generar / Reiniciar QR" para comenzar</p>';
+          if (btnLogout) btnLogout.style.display = 'none';
+        }
+      } catch (e) {}
+    }
+
+    async function initPanelWapp() {
+      try {
+        await fetch(getApiUrl('/api/admin/qr-init'), { method: 'POST' });
+        checkPanelWappStatus();
+      } catch (e) {
+        alert('Error iniciando WhatsApp');
+      }
+    }
+
+    async function logoutPanelWapp() {
+      if (confirm('¿Estás seguro de que deseas cerrar la sesión de WhatsApp Web y desvincular el número de tu bot?')) {
+        try {
+          await fetch(getApiUrl('/api/admin/qr-logout'), { method: 'POST' });
+          checkPanelWappStatus();
+        } catch (e) {
+          alert('Error al cerrar sesión');
+        }
+      }
+    }
+
+    setInterval(checkPanelWappStatus, 4000);
 
     async function fetchDashboard() {
       const data = await apiFetch('/api/admin/stats');
@@ -812,7 +903,7 @@
       }
     }
 
-    // Grados (Oferta Académica) Modal & CRUD
+    // Grados Modal & CRUD
     async function fetchGrados() {
       const grados = await apiFetch('/api/admin/grados');
       const tbody = document.getElementById('tbl-grados');
@@ -820,13 +911,10 @@
         <tr>
           <td>${g.id}</td>
           <td><strong>${g.nombre}</strong></td>
-          <td>${g.nivel_nombre}</td>
+          <td>${g.nivel_nombre || 'Nivel General'}</td>
           <td>${g.activo ? '<span style="color:var(--color-success); font-weight:600;">Activo</span>' : '<span style="color:var(--color-danger);">Inactivo</span>'}</td>
           <td>
-            <div style="display:flex; gap:6px;">
-              <button class="btn btn-sm btn-secondary" onclick="modalEditarGrado(${g.id}, '${encodeURIComponent(g.nombre)}', ${g.nivel_id}, ${g.activo})"><svg class="icon"><use href="#icon-edit"/></svg> Editar</button>
-              <button class="btn btn-sm btn-danger" onclick="eliminarGrado(${g.id})"><svg class="icon"><use href="#icon-trash"/></svg></button>
-            </div>
+            <button class="btn btn-sm btn-danger" onclick="eliminarGrado(${g.id})"><svg class="icon"><use href="#icon-trash"/></svg></button>
           </td>
         </tr>
       `).join('');
@@ -836,47 +924,21 @@
       const html = `
         <div class="input-group">
           <label>Nombre del Grado</label>
-          <input type="text" id="grado-nombre" required placeholder="Ej: Grado 10 - Media Académica">
+          <input type="text" id="grado-nombre" required placeholder="Ej: Primaria (1° a 5°)">
         </div>
         <div class="input-group">
-          <label>ID Nivel Educativo</label>
-          <input type="number" id="grado-nivel" value="1" required>
+          <label>Orden de visualización</label>
+          <input type="number" id="grado-orden" value="1" required>
         </div>
       `;
-      openModal('Nuevo Grado Académico', html, async () => {
+      openModal('Crear Nuevo Grado Educativo', html, async () => {
         await apiFetch('/api/admin/grados', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             nombre: document.getElementById('grado-nombre').value,
-            nivel_id: Number(document.getElementById('grado-nivel').value),
-            activo: true
-          })
-        });
-        fetchGrados();
-      });
-    }
-
-    function modalEditarGrado(id, nomEnc, nivelId, activo) {
-      const nom = decodeURIComponent(nomEnc);
-      const html = `
-        <div class="input-group">
-          <label>Nombre del Grado</label>
-          <input type="text" id="grado-nombre" value="${nom}" required>
-        </div>
-        <div class="input-group">
-          <label>ID Nivel Educativo</label>
-          <input type="number" id="grado-nivel" value="${nivelId}" required>
-        </div>
-      `;
-      openModal('Editar Grado Académico', html, async () => {
-        await apiFetch('/api/admin/grados', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            id,
-            nombre: document.getElementById('grado-nombre').value,
-            nivel_id: Number(document.getElementById('grado-nivel').value),
+            orden: document.getElementById('grado-orden').value,
+            nivel_id: 1,
             activo: true
           })
         });
@@ -891,83 +953,45 @@
       }
     }
 
-    // Bot Mensajes Modal & CRUD
+    // Textos Administrables del Bot
     async function fetchBot() {
-      const msgs = await apiFetch('/api/admin/bot-mensajes');
+      const botMsgs = await apiFetch('/api/admin/bot-mensajes');
       const tbody = document.getElementById('tbl-bot');
-      tbody.innerHTML = msgs.map(m => `
+      tbody.innerHTML = botMsgs.map(m => `
         <tr>
           <td><code>${m.clave}</code></td>
           <td><strong>${m.titulo}</strong></td>
-          <td style="max-width:300px; white-space:pre-wrap;">${m.contenido}</td>
+          <td style="max-width:350px; white-space:pre-wrap;">${m.contenido}</td>
           <td>
-            <div style="display:flex; gap:6px;">
-              <button class="btn btn-sm btn-secondary" onclick="modalEditarBotMsg(${m.id}, '${encodeURIComponent(m.clave)}', '${encodeURIComponent(m.titulo)}', '${encodeURIComponent(m.contenido)}')"><svg class="icon"><use href="#icon-edit"/></svg> Editar</button>
-              <button class="btn btn-sm btn-danger" onclick="eliminarBotMsg(${m.id})"><svg class="icon"><use href="#icon-trash"/></svg></button>
-            </div>
+            <button class="btn btn-sm btn-secondary" onclick="modalEditarBotMsg(${m.id}, '${encodeURIComponent(m.clave)}', '${encodeURIComponent(m.titulo)}', '${encodeURIComponent(m.contenido)}')"><svg class="icon"><use href="#icon-edit"/></svg> Editar</button>
           </td>
         </tr>
       `).join('');
     }
 
-    function modalCrearBotMsg() {
-      const html = `
-        <div class="input-group">
-          <label>Clave Única (slug)</label>
-          <input type="text" id="bot-clave" required placeholder="Ej: bienvenida_descuento">
-        </div>
-        <div class="input-group">
-          <label>Título Informativo</label>
-          <input type="text" id="bot-titulo" required placeholder="Ej: Mensaje de Promoción">
-        </div>
-        <div class="input-group">
-          <label>Contenido del Mensaje</label>
-          <textarea id="bot-contenido" rows="4" required placeholder="Texto formal que enviará el bot..."></textarea>
-        </div>
-      `;
-      openModal('Nuevo Texto del Bot', html, async () => {
-        await apiFetch('/api/admin/bot-mensajes', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            clave: document.getElementById('bot-clave').value,
-            titulo: document.getElementById('bot-titulo').value,
-            contenido: document.getElementById('bot-contenido').value,
-            activo: true
-          })
-        });
-        fetchBot();
-      });
-    }
-
-    function modalEditarBotMsg(id, claveEnc, titEnc, contEnc) {
+    function modalEditarBotMsg(id, claveEnc, tituloEnc, contEnc) {
       const clave = decodeURIComponent(claveEnc);
-      const tit = decodeURIComponent(titEnc);
+      const titulo = decodeURIComponent(tituloEnc);
       const cont = decodeURIComponent(contEnc);
 
       const html = `
         <div class="input-group">
-          <label>Clave Única</label>
-          <input type="text" id="bot-clave" value="${clave}" required readonly style="background:#EAE6DF;">
-        </div>
-        <div class="input-group">
-          <label>Título Informativo</label>
-          <input type="text" id="bot-titulo" value="${tit}" required>
+          <label>Título del Mensaje</label>
+          <input type="text" id="bot-tit" value="${titulo}" required>
         </div>
         <div class="input-group">
           <label>Contenido del Mensaje</label>
-          <textarea id="bot-contenido" rows="4" required>${cont}</textarea>
+          <textarea id="bot-cont" rows="5" required>${cont}</textarea>
         </div>
       `;
-      openModal('Editar Texto del Bot', html, async () => {
-        await apiFetch('/api/admin/bot-mensajes', {
-          method: 'POST',
+      openModal(`Editar Texto: ${clave}`, html, async () => {
+        await apiFetch(`/api/admin/bot-mensajes/${id}`, {
+          method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            id,
-            clave: document.getElementById('bot-clave').value,
-            titulo: document.getElementById('bot-titulo').value,
-            contenido: document.getElementById('bot-contenido').value,
+            clave,
+            titulo: document.getElementById('bot-tit').value,
+            contenido: document.getElementById('bot-cont').value,
             activo: true
           })
         });
@@ -975,11 +999,34 @@
       });
     }
 
-    async function eliminarBotMsg(id) {
-      if (solicitarPinProteccion()) {
-        await apiFetch(`/api/admin/bot-mensajes/${id}`, { method: 'DELETE' });
+    function modalCrearBotMsg() {
+      const html = `
+        <div class="input-group">
+          <label>Clave Única (sin espacios)</label>
+          <input type="text" id="bot-clave" required placeholder="Ej: bienvenida">
+        </div>
+        <div class="input-group">
+          <label>Título del Mensaje</label>
+          <input type="text" id="bot-tit" required placeholder="Ej: Saludo de bienvenida">
+        </div>
+        <div class="input-group">
+          <label>Contenido del Mensaje</label>
+          <textarea id="bot-cont" rows="4" required placeholder="Mensaje oficial..."></textarea>
+        </div>
+      `;
+      openModal('Crear Nuevo Texto Administrable', html, async () => {
+        await apiFetch('/api/admin/bot-mensajes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            clave: document.getElementById('bot-clave').value,
+            titulo: document.getElementById('bot-tit').value,
+            contenido: document.getElementById('bot-cont').value,
+            activo: true
+          })
+        });
         fetchBot();
-      }
+      });
     }
   </script>
 </body>
