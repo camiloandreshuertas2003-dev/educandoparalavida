@@ -12,6 +12,7 @@ let clientStatus = 'disconnected'; // 'disconnected', 'initializing', 'qr_ready'
 let userProfile = null;
 const processedMsgIds = new Set();
 const botSentMsgIds = new Set();
+const contactJidMap = new Map();
 
 const authFolder = path.join(__dirname, '../../.baileys_auth');
 
@@ -20,7 +21,7 @@ async function initWhatsAppWeb() {
     return sock;
   }
 
-  console.log('⚡ Inicializando motor ultra-liviano WhatsApp Web (Baileys WebSocket 35MB RAM)...');
+  console.log('⚡ Inicializando motor ultra-liviano WhatsApp Web (Baileys WebSocket)...');
   clientStatus = 'initializing';
 
   try {
@@ -107,9 +108,9 @@ async function initWhatsAppWeb() {
       }
     });
 
-    // Escuchar únicamente mensajes entrantes de clientes
+    // Escuchar únicamente notificaciones en vivo de mensajes entrantes de clientes
     sock.ev.on('messages.upsert', async (m) => {
-      if (!m || !m.messages || m.messages.length === 0) return;
+      if (!m || m.type !== 'notify' || !m.messages || m.messages.length === 0) return;
 
       for (const msg of m.messages) {
         if (!msg.message) continue;
@@ -130,17 +131,20 @@ async function initWhatsAppWeb() {
         const remoteJid = msg.key.remoteJid;
         if (!remoteJid || remoteJid.includes('@g.us')) continue; // Ignorar grupos
 
-        const fromNumber = remoteJid.replace(/[^\d]/g, '');
+        const fromNumber = remoteJid.split('@')[0].split(':')[0].replace(/[^\d]/g, '');
+        contactJidMap.set(fromNumber, remoteJid);
+
         const textContent =
           msg.message.conversation ||
           msg.message.extendedTextMessage?.text ||
           msg.message.buttonsResponseBodyText ||
+          msg.message.listResponseBody?.singleSelectReply?.selectedRowId ||
           '';
 
         const textoLimpio = textContent.trim();
         if (!textoLimpio) continue;
 
-        console.log(`📩 [WhatsApp Web Baileys] Mensaje entrante de cliente ${fromNumber}: "${textoLimpio}"`);
+        console.log(`📩 [WhatsApp Web Baileys] Mensaje en vivo de ${fromNumber}: "${textoLimpio}"`);
 
         const { procesarMensaje } = require('./conversationService');
         try {
@@ -211,9 +215,9 @@ async function enviarMensajeWWeb(telefono, mensaje) {
   }
 
   const cleanPhone = telefono.toString().replace(/[^\d]/g, '');
-  const targetJid = `${cleanPhone}@s.whatsapp.net`;
+  const targetJid = contactJidMap.get(cleanPhone) || `${cleanPhone}@s.whatsapp.net`;
 
-  console.log(`📤 [WhatsApp Web Baileys] Enviando mensaje a ${cleanPhone}...`);
+  console.log(`📤 [WhatsApp Web Baileys] Enviando mensaje a ${cleanPhone} (${targetJid})...`);
 
   try {
     const result = await sock.sendMessage(targetJid, { text: mensaje });
