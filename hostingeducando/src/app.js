@@ -22,12 +22,32 @@ app.use(express.urlencoded({ extended: true }));
 app.get('/favicon.ico', (req, res) => res.status(204).end());
 app.get('/favicon.png', (req, res) => res.status(204).end());
 
-// Endpoint JSON para comprobaciones de salud (healthcheck)
-app.get('/health', (req, res) => {
+// Endpoint JSON para comprobaciones de salud (healthcheck) y Keep-Alive de Passenger cPanel
+app.get('/health', async (req, res) => {
+  let dbStatus = 'ok';
+  try {
+    const pool = require('./config/db');
+    await pool.query('SELECT 1');
+  } catch (e) {
+    dbStatus = 'error: ' + e.message;
+  }
+
+  let wwebStatus = 'disconnected';
+  let userProfile = null;
+  try {
+    const { getWWebStatus } = require('./services/whatsappWebService');
+    const statusObj = getWWebStatus();
+    wwebStatus = statusObj.status;
+    userProfile = statusObj.userProfile;
+  } catch (e) {}
+
   res.json({
-    status: 'online',
+    status: 'ok',
     app: 'Bot WhatsApp Colegio - Educando para la Vida',
     timestamp: new Date().toISOString(),
+    database: dbStatus,
+    whatsapp: wwebStatus,
+    userProfile
   });
 });
 
