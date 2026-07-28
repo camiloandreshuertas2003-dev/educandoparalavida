@@ -198,21 +198,23 @@ async function guardarLead(telefono, nombreCompleto, telefonoContacto, gradoId, 
     const nombre = partes[0] || 'Interesado';
     const apellido = partes.slice(1).join(' ') || '';
 
+    const cleanTel = (telefonoContacto || telefono || 'Sin número').toString().trim();
+
     await pool.query(
       `INSERT INTO leads_fase2 (telefono, nombre_contacto, apellido_contacto, grado_interes_id, habeas_data_aceptado, puntaje)
        VALUES (?, ?, ?, ?, TRUE, ?)
        ON DUPLICATE KEY UPDATE nombre_contacto=?, apellido_contacto=?, grado_interes_id=?, puntaje=?, actualizado_en=NOW()`,
-      [telefonoContacto || telefono, nombre, apellido, gradoId || null, puntaje, nombre, apellido, gradoId || null, puntaje]
+      [cleanTel, nombre, apellido, gradoId || null, puntaje, nombre, apellido, gradoId || null, puntaje]
     );
 
     await pool.query(
       `INSERT INTO leads (telefono, nombre, apellido, programa_interes)
        VALUES (?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE nombre=?, apellido=?, programa_interes=?, fecha_registro=NOW()`,
-      [telefonoContacto || telefono, nombre, apellido, gradoTexto, nombre, apellido, gradoTexto]
+      [cleanTel, nombre, apellido, gradoTexto || 'Grado no especificado', nombre, apellido, gradoTexto || 'Grado no especificado']
     );
 
-    console.log(` Lead registrado exitosamente con scoring ${puntaje} para ${nombreCompleto} (${telefonoContacto || telefono})`);
+    console.log(`✅ Lead registrado exitosamente en MySQL con scoring ${puntaje} para ${nombreCompleto} (${cleanTel})`);
   } catch (error) {
     console.error(' Error al guardar lead en MySQL:', error.message);
   }
@@ -272,7 +274,7 @@ async function procesarMensaje(telefono, mensajeTexto) {
       programa_temp: null,
     });
     
-    const bienvenida = '👋 ¡Hola! Bienvenido al Colegio Virtual Educando para la Vida 矿✨. Somos una institución educativa 100% autorizada 📚. Para brindarle información personalizada sobre matrículas, por favor indique su *Nombre Completo* (Nombres y Apellidos) ✍️:';
+    const bienvenida = '👋 ¡Hola! Bienvenido al Colegio Virtual Educando para la Vida 🎓✨. Somos una institución educativa 100% autorizada 📚. Para brindarle información personalizada sobre matrículas, por favor indique su *Nombre Completo* (Nombres y Apellidos) ✍️:';
     await enviarMensajeTexto(telefono, bienvenida);
     registrarLog(telefono, 'saliente', bienvenida).catch(() => {});
     await actualizarConversacion(telefono, { paso_actual: 'nombre' });
@@ -415,11 +417,17 @@ async function procesarMensaje(telefono, mensajeTexto) {
         const gradoEncontrado = gradosDisponibles.find((g) => g.nombre.toLowerCase() === gradoFinal.toLowerCase());
         const gradoId = gradoEncontrado ? gradoEncontrado.id : null;
 
-        // Guardar Lead final en la base de datos
-        await guardarLead(telefonoContactoFinal, nombreFinal, telefonoContactoFinal, gradoId, gradoFinal);
-
+        // 1. Marcar conversación como finalizada INMEDIATAMENTE
         await actualizarConversacion(telefono, { paso_actual: 'finalizado' });
 
+        // 2. Guardar Lead en la base de datos (con try/catch seguro interno)
+        try {
+          await guardarLead(telefono, nombreFinal, telefonoContactoFinal, gradoId, gradoFinal);
+        } catch (e) {
+          console.error('Error guardando lead:', e.message);
+        }
+
+        // 3. Enviar mensaje de confirmación final
         const confirmacion = `🎉 ¡Muchas gracias, ${nombreFinal}! ✨ Hemos registrado exitosamente su solicitud para el programa: *${gradoFinal}* 🎓. Un asesor académico de admisiones se comunicará con usted a la brevedad 📲.\n\n(Escriba *REINICIAR* en cualquier momento si desea realizar otra consulta) 🌟.`;
         await enviarMensajeTexto(telefono, confirmacion);
         registrarLog(telefono, 'saliente', confirmacion).catch(() => {});
