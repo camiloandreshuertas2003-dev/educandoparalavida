@@ -4,16 +4,22 @@ require('dotenv').config();
 let poolConfig = {};
 
 function getIndividualConfig() {
+  let user = process.env.DB_USER || 'ki11745159_educandoparalavida1';
+  // Si el usuario ingresado no termina en 1, asegurar que use ki11745159_educandoparalavida1 para Contabo
+  if (user === 'ki11745159_educandoparalavida') {
+    user = 'ki11745159_educandoparalavida1';
+  }
+
   return {
     host: process.env.DB_HOST || '213.136.93.164',
     port: Number(process.env.DB_PORT) || 3306,
-    user: process.env.DB_USER || 'ki11745159_educandoparalavida1',
+    user: user,
     password: process.env.DB_PASSWORD || '39?KIO1zZqo[ZH5?',
     database: process.env.DB_NAME || 'ki11745159_educandoparalavida',
     waitForConnections: true,
     connectionLimit: 5,
     queueLimit: 0,
-    connectTimeout: 2500, // 2.5 segundos máximo de espera para no bloquear Vercel Serverless
+    connectTimeout: 5000,
   };
 }
 
@@ -29,7 +35,7 @@ if (process.env.DATABASE_URL) {
       waitForConnections: true,
       connectionLimit: 5,
       queueLimit: 0,
-      connectTimeout: 2500,
+      connectTimeout: 5000,
     };
   } catch (err) {
     console.error('Error parseando DATABASE_URL:', err.message);
