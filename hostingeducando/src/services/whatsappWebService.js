@@ -157,6 +157,11 @@ function initWhatsAppWeb() {
 }
 
 function getWWebStatus() {
+  if (clientStatus === 'disconnected' && !client) {
+    try {
+      initWhatsAppWeb();
+    } catch (e) {}
+  }
   return {
     status: clientStatus,
     hasQr: !!currentQrDataUri,

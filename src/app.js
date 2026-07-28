@@ -103,6 +103,12 @@ if (!process.env.VERCEL) {
     console.log(` Webhook URL: http://localhost:${PORT}/webhook`);
     console.log(`===================================================`);
 
+    // Restaurar mensajes configurados, FAQs y Grados en la base de datos
+    try {
+      const { sembrarDatosIniciales } = require('./config/seed');
+      sembrarDatosIniciales();
+    } catch (e) {}
+
     // Inicializar cliente de WhatsApp Web en servidores Node continuos
     try {
       const { initWhatsAppWeb } = require('./services/whatsappWebService');
