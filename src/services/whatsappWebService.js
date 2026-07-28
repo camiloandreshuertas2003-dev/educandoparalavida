@@ -107,11 +107,15 @@ function initWhatsAppWeb() {
       clientId: 'colegio-bot-session',
       dataPath: path.join(__dirname, '../../.wwebjs_auth')
     }),
+    webVersionCache: {
+      type: 'remote',
+      remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.1014587033-alpha.html'
+    },
     puppeteer: {
       headless: true,
       executablePath: executablePath || undefined,
       args: puppeteerArgs,
-      timeout: 120000
+      timeout: 180000
     }
   });
 

@@ -688,6 +688,11 @@
           badge.innerHTML = '🟡 Listo para Escanear Código QR';
           qrBox.innerHTML = '<img src="' + data.qrDataUri + '" style="width: 240px; height: 240px; display: block;" alt="WhatsApp QR" />';
           if (btnLogout) btnLogout.style.display = 'none';
+        } else if (data.status === 'authenticated') {
+          badge.className = 'badge-tab badge-contactado';
+          badge.innerHTML = '🟢 Escaneado con Éxito. Sincronizando chats...';
+          qrBox.innerHTML = '<div style="color: var(--color-primary); font-weight: 700;">📲 ¡Código QR reconocido por WhatsApp!<br><span style="font-size: 0.85rem; color: var(--color-muted);">Sincronizando la línea telefónica en el servidor...</span></div>';
+          if (btnLogout) btnLogout.style.display = 'none';
         } else if (data.status === 'initializing') {
           badge.className = 'badge-tab';
           badge.innerHTML = '⏳ Inicializando navegador...';
