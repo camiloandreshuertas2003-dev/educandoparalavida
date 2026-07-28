@@ -40,19 +40,19 @@ function initWhatsAppWeb() {
     return client;
   }
 
-  console.log('⚡ Inicializando cliente WhatsApp Web (QR Mode)...');
+  console.log('⚡ Inicializando cliente WhatsApp Web (QR Mode con optimización de memoria de 256MB RAM)...');
   clientStatus = 'initializing';
 
   let executablePath = null;
 
-  // 1. Buscar primero en la carpeta de cache local del proyecto ./.cache/puppeteer
+  // 1. Buscar en la carpeta local de cache ./.cache/puppeteer
   const localChromeBinary = findExecutableInFolder(localCacheDir, 'chrome');
   if (localChromeBinary && fs.existsSync(localChromeBinary)) {
     executablePath = localChromeBinary;
-    console.log('🌐 Encontrado binario local persistente de Chrome en:', executablePath);
+    console.log('🌐 Encontrado binario local de Chrome en:', executablePath);
   }
 
-  // 2. Si no esta en la carpeta local, probar la API de puppeteer
+  // 2. Probar la API de puppeteer
   if (!executablePath) {
     try {
       const puppeteer = require('puppeteer');
@@ -66,7 +66,7 @@ function initWhatsAppWeb() {
     } catch (e) {}
   }
 
-  // 3. Probar rutas del sistema Linux si aplica
+  // 3. Probar rutas del sistema Linux
   if (!executablePath) {
     const systemPaths = [
       '/usr/bin/google-chrome',
@@ -84,12 +84,7 @@ function initWhatsAppWeb() {
     }
   }
 
-  if (executablePath) {
-    console.log('🌐 Ejecutable final de Chrome validado:', executablePath);
-  } else {
-    console.log('🌐 Usando resolución predeterminada del navegador Puppeteer');
-  }
-
+  // BANDERAS DE ULTRA-BAJO CONSUMO DE MEMORIA RAM (< 280MB) PARA RENDER
   const puppeteerArgs = [
     '--no-sandbox',
     '--disable-setuid-sandbox',
@@ -97,9 +92,33 @@ function initWhatsAppWeb() {
     '--disable-accelerated-2d-canvas',
     '--no-first-run',
     '--no-zygote',
-    '--single-process',
+    '--single-process', // CRÍTICO: Mantener todo en un solo proceso
     '--disable-gpu',
-    '--disable-software-rasterizer'
+    '--disable-software-rasterizer',
+    '--js-flags="--max-old-space-size=256"', // RESTRINGIR MOTOR JS DE CHROME A MÁXIMO 256MB RAM
+    '--disable-extensions',
+    '--disable-component-extensions-with-background-pages',
+    '--disable-default-apps',
+    '--mute-audio',
+    '--no-default-browser-check',
+    '--disable-background-networking',
+    '--disable-background-timer-throttling',
+    '--disable-backgrounding-occluded-windows',
+    '--disable-breakpad',
+    '--disable-client-side-phishing-detection',
+    '--disable-component-update',
+    '--disable-domain-reliability',
+    '--disable-hang-monitor',
+    '--disable-ipc-flooding-protection',
+    '--disable-notifications',
+    '--disable-popup-blocking',
+    '--disable-print-preview',
+    '--disable-prompt-on-repost',
+    '--disable-renderer-backgrounding',
+    '--disable-speech-api',
+    '--disable-sync',
+    '--hide-scrollbars',
+    '--metrics-recording-only'
   ];
 
   client = new Client({
@@ -122,7 +141,6 @@ function initWhatsAppWeb() {
   client.on('qr', async (qr) => {
     console.log('===================================================');
     console.log('📱 ¡NUEVO CÓDIGO QR GENERADO DE WHATSAPP WEB!');
-    console.log('Escanea este código QR con WhatsApp en tu celular:');
     console.log('===================================================');
     
     currentQrCode = qr;
@@ -138,7 +156,7 @@ function initWhatsAppWeb() {
   });
 
   client.on('authenticated', () => {
-    console.log('✅ WhatsApp Web Autenticado con éxito');
+    console.log('✅ WhatsApp Web Autenticado con éxito! Sincronizando en modo bajo consumo...');
     clientStatus = 'authenticated';
     currentQrCode = null;
     currentQrDataUri = null;
