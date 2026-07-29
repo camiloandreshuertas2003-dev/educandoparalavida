@@ -107,7 +107,7 @@ async function initWhatsAppWeb() {
     sock = null;
   }
 
-  agregarLogMemoria('info', '⚡ Inicializando motor Baileys WebSocket con Signal Keypair Exchange...');
+  agregarLogMemoria('info', '⚡ Inicializando motor Baileys WebSocket con regla de presencia composing...');
   clientStatus = 'initializing';
 
   try {
@@ -346,24 +346,22 @@ async function enviarMensajeWWeb(sessionId, mensaje) {
     }
   }
 
-  // 2. Establecer / verificar llaves de cifrado Signal con Meta llamando a onWhatsApp
+  // 2. REGLA PROTOCOLAR BAILEYS: Enviar presencia de escritura 'composing' para activar la ventana del chat en el celular
   try {
-    const checkWa = await sock.onWhatsApp(targetJid);
-    if (checkWa && checkWa.length > 0 && checkWa[0].exists && checkWa[0].jid) {
-      targetJid = checkWa[0].jid;
-      agregarLogMemoria('info', `🔑 Llaves de cifrado Signal verificadas para ${targetJid}`);
-    }
+    await sock.sendPresenceUpdate('composing', targetJid);
+    await new Promise((res) => setTimeout(res, 800));
+    await sock.sendPresenceUpdate('paused', targetJid);
   } catch (e) {}
 
-  agregarLogMemoria('enviando', `📤 Enviando respuesta cifrada a ${targetJid}...`);
+  agregarLogMemoria('enviando', `📤 Transmitiendo respuesta a ${targetJid}...`);
 
   try {
-    // Transmitir texto directo al canal cifrado verificado
+    // 3. Transmitir texto directo al canal activado
     const result = await sock.sendMessage(targetJid, { text: mensaje });
     if (result && result.key && result.key.id) {
       botSentMsgIds.add(result.key.id);
     }
-    agregarLogMemoria('exito', `✅ Mensaje cifrado entregado exitosamente al celular ${targetJid}`);
+    agregarLogMemoria('exito', `✅ Mensaje entregado con éxito en pantalla a ${targetJid}`);
     return result;
   } catch (err) {
     agregarLogMemoria('error', `❌ Error enviando respuesta a ${targetJid}: ${err.message}`);
