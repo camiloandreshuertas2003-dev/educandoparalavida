@@ -77,7 +77,7 @@ async function initWhatsAppWeb() {
     sock = null;
   }
 
-  agregarLogMemoria('info', '⚡ Inicializando motor Baileys WebSocket nativo...');
+  agregarLogMemoria('info', '⚡ Inicializando motor Baileys WebSocket...');
   clientStatus = 'initializing';
 
   try {
@@ -195,7 +195,11 @@ async function initWhatsAppWeb() {
         const fromNumber = normalizarJidCliente(msg);
         if (!fromNumber) continue;
 
-        // Guardar referencia exacta del objeto de mensaje para citar respuesta en el chat del usuario
+        // Registrar detalle completo de la estructura del paquete para diagnostico de JID
+        const keyDetails = JSON.stringify(msg.key);
+        agregarLogMemoria('debug_key', `🔑 MSG KEY: ${keyDetails}`);
+
+        // Guardar referencia del mensaje entrante
         lastMsgMap.set(fromNumber, msg);
         lastMsgMap.set(remoteJid, msg);
 
