@@ -1,23 +1,17 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestWaWebVersion } = require('@whiskeysockets/baileys');
+const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcodeTerminal = require('qrcode-terminal');
 const QRCode = require('qrcode');
 const path = require('path');
 const fs = require('fs');
-const pino = require('pino');
 
-let sock = null;
+let client = null;
 let currentQrCode = null;
 let currentQrDataUri = null;
-let clientStatus = 'disconnected'; // 'disconnected', 'initializing', 'qr_ready', 'authenticated', 'ready'
+let clientStatus = 'disconnected'; // 'disconnected', 'initializing', 'qr_ready', 'ready'
 let userProfile = null;
 
-const processedMsgIds = new Set();
-const botSentMsgIds = new Set();
-const contactJidMap = new Map();
-const lastMsgMap = new Map();
-
-// Registro de Logs en Memoria para depuración gráfica en vivo en el navegador
 const logsEnMemoria = [];
+const activeChats = new Map();
 
 function agregarLogMemoria(tipo, mensaje) {
   const timestamp = new Date().toLocaleTimeString('es-CO');
@@ -33,202 +27,127 @@ function obtenerLogsMemoria() {
   return logsEnMemoria;
 }
 
-const authFolder = path.join(__dirname, '../../.baileys_auth');
-
-/**
- * Formatear celular al estándar internacional de Colombia si aplica (+57)
- */
 function formatearJidInternacional(telefono) {
   let clean = (telefono || '').toString().replace(/[^\d]/g, '');
   if (!clean) return '';
-
   if (clean.length === 10 && clean.startsWith('3')) {
     clean = '57' + clean;
   }
-
   return clean;
 }
 
-/**
- * Normalizar JID de cliente ignorando canales @newsletter
- */
-function normalizarJidCliente(msg) {
-  const remoteJid = msg.key.remoteJid || '';
-
-  if (remoteJid.includes('@newsletter') || remoteJid.includes('@g.us') || remoteJid.includes('status@broadcast')) {
-    return null;
-  }
-
-  const rawDigits = remoteJid.split('@')[0].split(':')[0].replace(/[^\d]/g, '');
-  const cleanPhone = formatearJidInternacional(rawDigits);
-  return cleanPhone || rawDigits;
-}
-
 async function initWhatsAppWeb() {
-  if (sock && clientStatus === 'ready') {
-    return sock;
+  if (client && clientStatus === 'ready') {
+    return client;
   }
 
-  if (sock && clientStatus !== 'ready') {
+  if (client) {
     try {
-      sock.ev.removeAllListeners();
-      sock.ws.close();
+      await client.destroy();
     } catch (e) {}
-    sock = null;
+    client = null;
   }
 
-  agregarLogMemoria('info', '⚡ Inicializando motor Baileys WebSocket...');
+  agregarLogMemoria('info', '⚡ Inicializando motor Chromium WhatsApp Web (whatsapp-web.js)...');
   clientStatus = 'initializing';
 
   try {
-    const { state, saveCreds } = await useMultiFileAuthState(authFolder);
-    const { version } = await fetchLatestWaWebVersion().catch(() => ({ version: [2, 3000, 1015901307] }));
-
-    sock = makeWASocket({
-      version,
-      auth: state,
-      printQRInTerminal: false,
-      logger: pino({ level: 'silent' }),
-      browser: ['Educando para la Vida', 'Chrome', '1.0.0'],
-      connectTimeoutMs: 60000,
-      keepAliveIntervalMs: 25000,
-      emitOwnEvents: false,
-    });
-
-    sock.ev.on('creds.update', saveCreds);
-
-    sock.ev.on('connection.update', async (update) => {
-      const { connection, lastDisconnect, qr } = update;
-
-      if (qr) {
-        agregarLogMemoria('qr', '📱 Código QR listo para escanear');
-        currentQrCode = qr;
-        clientStatus = 'qr_ready';
-        qrcodeTerminal.generate(qr, { small: true });
-
-        try {
-          currentQrDataUri = await QRCode.toDataURL(qr);
-        } catch (err) {
-          agregarLogMemoria('error', `Error generando Data URI QR: ${err.message}`);
-        }
-      }
-
-      if (connection === 'connecting') {
-        if (clientStatus !== 'qr_ready') {
-          clientStatus = 'initializing';
-        }
-      }
-
-      if (connection === 'open') {
-        clientStatus = 'ready';
-        currentQrCode = null;
-        currentQrDataUri = null;
-
-        try {
-          const userJid = sock.user ? sock.user.id : '';
-          const cleanPhone = userJid ? userJid.split(':')[0].split('@')[0] : '';
-          userProfile = {
-            name: sock.user ? (sock.user.name || 'Colegio Educando para la Vida') : 'Colegio Educando para la Vida',
-            phone: cleanPhone
-          };
-          agregarLogMemoria('exito', `🎉 Sesión WhatsApp lista para: ${userProfile.name} (+${userProfile.phone})`);
-        } catch (e) {
-          agregarLogMemoria('exito', '🎉 Sesión WhatsApp conectada y lista 100%');
-        }
-      }
-
-      if (connection === 'close') {
-        const statusCode = lastDisconnect?.error?.output?.statusCode;
-        const isLoggedOut = statusCode === DisconnectReason.loggedOut;
-
-        agregarLogMemoria('warn', `⚠️ Conexión de WhatsApp cerrada (Código ${statusCode || 'desconocido'})`);
-
-        currentQrCode = null;
-        currentQrDataUri = null;
-        sock = null;
-
-        if (statusCode === 440 || isLoggedOut) {
-          clientStatus = 'disconnected';
-          userProfile = null;
-          try {
-            if (fs.existsSync(authFolder)) {
-              fs.rmSync(authFolder, { recursive: true, force: true });
-            }
-          } catch (e) {}
-          setTimeout(() => initWhatsAppWeb(), 3000);
-        } else {
-          clientStatus = 'initializing';
-          setTimeout(() => initWhatsAppWeb(), 3000);
-        }
+    client = new Client({
+      authStrategy: new LocalAuth({
+        clientId: 'bot-colegio-session',
+        dataPath: path.join(__dirname, '../../.wwebjs_auth')
+      }),
+      puppeteer: {
+        headless: true,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-accelerated-2d-canvas',
+          '--no-first-run',
+          '--no-zygote',
+          '--disable-gpu',
+          '--unhandled-rejections=strict'
+        ]
       }
     });
 
-    // Escuchar mensajes entrantes en tiempo real
-    sock.ev.on('messages.upsert', async (m) => {
-      if (!m || !m.messages || m.messages.length === 0) return;
+    client.on('qr', async (qr) => {
+      agregarLogMemoria('qr', '📱 Código QR listo para escanear en WhatsApp Web');
+      currentQrCode = qr;
+      clientStatus = 'qr_ready';
+      qrcodeTerminal.generate(qr, { small: true });
 
-      for (const msg of m.messages) {
-        if (!msg.message) continue;
-        if (msg.key.fromMe) continue; // Ignorar mensajes salientes enviados por el bot
+      try {
+        currentQrDataUri = await QRCode.toDataURL(qr);
+      } catch (err) {
+        agregarLogMemoria('error', `Error generando Data URI QR: ${err.message}`);
+      }
+    });
 
-        const remoteJid = msg.key.remoteJid || '';
-        if (remoteJid.includes('@newsletter') || remoteJid.includes('@g.us') || remoteJid.includes('status@broadcast')) {
-          continue;
-        }
+    client.on('ready', async () => {
+      clientStatus = 'ready';
+      currentQrCode = null;
+      currentQrDataUri = null;
 
-        const msgId = msg.key.id;
-        if (msgId && (processedMsgIds.has(msgId) || botSentMsgIds.has(msgId))) {
-          continue;
-        }
+      try {
+        const info = client.info;
+        userProfile = {
+          name: info ? (info.pushname || 'Colegio Educando para la Vida') : 'Colegio Educando para la Vida',
+          phone: info ? (info.wid ? info.wid.user : '') : ''
+        };
+        agregarLogMemoria('exito', `🎉 Sesión WhatsApp Web lista para: ${userProfile.name} (+${userProfile.phone})`);
+      } catch (e) {
+        agregarLogMemoria('exito', '🎉 Sesión WhatsApp Web conectada y lista 100%');
+      }
+    });
 
-        const textContent =
-          msg.message.conversation ||
-          msg.message.extendedTextMessage?.text ||
-          msg.message.buttonsResponseBodyText ||
-          msg.message.listResponseBody?.singleSelectReply?.selectedRowId ||
-          msg.message.templateButtonReplyMessage?.selectedId ||
-          '';
+    client.on('disconnected', (reason) => {
+      agregarLogMemoria('warn', `⚠️ Sesión de WhatsApp desconectada: ${reason}`);
+      clientStatus = 'disconnected';
+      currentQrCode = null;
+      currentQrDataUri = null;
+      userProfile = null;
+      client = null;
+      setTimeout(() => initWhatsAppWeb(), 3000);
+    });
 
-        const textoLimpio = textContent.trim();
-        if (!textoLimpio) continue;
+    client.on('message', async (msg) => {
+      try {
+        if (msg.fromMe) return;
 
-        const fromNumber = normalizarJidCliente(msg);
-        if (!fromNumber) continue;
+        const chat = await msg.getChat();
+        if (chat.isGroup) return; // Ignorar grupos
 
-        // Guardar la referencia exacta del objeto de mensaje para citar la respuesta (quoted context)
-        lastMsgMap.set(fromNumber, msg);
-        lastMsgMap.set(remoteJid, msg);
+        const fromNumber = formatearJidInternacional(msg.from.split('@')[0]);
+        const textContent = (msg.body || '').trim();
 
-        if (msgId) {
-          processedMsgIds.add(msgId);
-          if (processedMsgIds.size > 2000) {
-            const first = processedMsgIds.values().next().value;
-            processedMsgIds.delete(first);
-          }
-        }
+        if (!textContent) return;
 
-        agregarLogMemoria('recibido', `📩 De ${fromNumber} (JID: ${remoteJid}): "${textoLimpio}"`);
+        activeChats.set(fromNumber, msg);
+        activeChats.set(msg.from, msg);
+
+        agregarLogMemoria('recibido', `📩 De ${fromNumber} (${msg.from}): "${textContent}"`);
 
         const { procesarMensaje } = require('./conversationService');
-        try {
-          await procesarMensaje(fromNumber, textoLimpio);
-        } catch (err) {
-          agregarLogMemoria('error', `❌ Error procesando mensaje de ${fromNumber}: ${err.message}`);
-        }
+        await procesarMensaje(fromNumber || msg.from, textContent);
+      } catch (err) {
+        agregarLogMemoria('error', `❌ Error procesando mensaje: ${err.message}`);
       }
     });
 
+    await client.initialize();
   } catch (err) {
-    agregarLogMemoria('error', `❌ Error inicializando Baileys: ${err.message}`);
+    agregarLogMemoria('error', `❌ Error inicializando whatsapp-web.js: ${err.message}`);
     clientStatus = 'disconnected';
-    sock = null;
+    client = null;
   }
 
-  return sock;
+  return client;
 }
 
 function getWWebStatus() {
-  if (clientStatus === 'disconnected' && !sock) {
+  if (clientStatus === 'disconnected' && !client) {
     try {
       initWhatsAppWeb();
     } catch (e) {}
@@ -245,16 +164,16 @@ function getWWebStatus() {
 }
 
 function isWhatsAppWebReady() {
-  return sock !== null && (clientStatus === 'ready' || !!(sock && sock.user && sock.user.id));
+  return client !== null && clientStatus === 'ready';
 }
 
 async function logoutWhatsAppWeb() {
   agregarLogMemoria('info', '🔴 Cerrando sesión de WhatsApp Web y reiniciando...');
-  if (sock) {
+  if (client) {
     try {
-      await sock.logout();
+      await client.logout();
     } catch (e) {}
-    sock = null;
+    client = null;
   }
 
   clientStatus = 'disconnected';
@@ -263,8 +182,9 @@ async function logoutWhatsAppWeb() {
   userProfile = null;
 
   try {
-    if (fs.existsSync(authFolder)) {
-      fs.rmSync(authFolder, { recursive: true, force: true });
+    const authPath = path.join(__dirname, '../../.wwebjs_auth');
+    if (fs.existsSync(authPath)) {
+      fs.rmSync(authPath, { recursive: true, force: true });
     }
   } catch (e) {}
 
@@ -275,44 +195,42 @@ async function logoutWhatsAppWeb() {
   return { status: 'disconnected', message: 'Sesión de WhatsApp cerrada exitosamente' };
 }
 
-async function enviarMensajeWWeb(sessionId, mensaje) {
+async function enviarMensajeWWeb(telefono, mensaje) {
   let retries = 0;
   while (!isWhatsAppWebReady() && retries < 10) {
     await new Promise((res) => setTimeout(res, 500));
     retries++;
   }
 
-  if (!sock) {
-    agregarLogMemoria('error', `❌ No se pudo enviar mensaje a ${sessionId}: Socket desconectado`);
-    throw new Error('WhatsApp Web no está listo (el socket está desconectado)');
+  if (!client) {
+    agregarLogMemoria('error', `❌ No se pudo enviar mensaje a ${telefono}: Cliente desconectado`);
+    throw new Error('WhatsApp Web no está listo');
   }
 
-  // 1. Obtener la referencia exacta del objeto de mensaje previo
-  const quotedMsg = lastMsgMap.get(sessionId);
-  
-  // 2. Determinar la dirección de respuesta usando remoteJid intacto del mensaje si existe
-  let targetJid = null;
-  if (quotedMsg && quotedMsg.key && quotedMsg.key.remoteJid) {
-    targetJid = quotedMsg.key.remoteJid;
-  } else {
-    const cleanPhone = formatearJidInternacional(sessionId);
-    targetJid = (cleanPhone && cleanPhone.length <= 13) ? `${cleanPhone}@s.whatsapp.net` : sessionId;
-  }
+  const cleanPhone = formatearJidInternacional(telefono);
+  const activeMsg = activeChats.get(telefono) || activeChats.get(cleanPhone);
 
-  const options = quotedMsg ? { quoted: quotedMsg } : {};
-
-  agregarLogMemoria('enviando', `📤 Enviando respuesta a ${targetJid}...`);
+  agregarLogMemoria('enviando', `📤 Enviando respuesta a ${cleanPhone || telefono}...`);
 
   try {
-    const result = await sock.sendMessage(targetJid, { text: mensaje }, options);
-    if (result && result.key && result.key.id) {
-      botSentMsgIds.add(result.key.id);
+    if (activeMsg) {
+      await activeMsg.reply(mensaje);
+      agregarLogMemoria('exito', `✅ Respuesta citada y entregada con éxito a ${cleanPhone || telefono}`);
+    } else {
+      const targetJid = cleanPhone.length <= 13 ? `${cleanPhone}@c.us` : (telefono.includes('@') ? telefono : `${cleanPhone}@c.us`);
+      await client.sendMessage(targetJid, mensaje);
+      agregarLogMemoria('exito', `✅ Mensaje entregado con éxito a ${targetJid}`);
     }
-    agregarLogMemoria('exito', `✅ Respuesta citada y entregada con éxito a ${targetJid}`);
-    return result;
   } catch (err) {
-    agregarLogMemoria('error', `❌ Error enviando respuesta a ${targetJid}: ${err.message}`);
-    throw err;
+    agregarLogMemoria('warn', `⚠️ Fallo envío primario, probando fallback a @c.us: ${err.message}`);
+    const fallbackJid = `${cleanPhone}@c.us`;
+    try {
+      await client.sendMessage(fallbackJid, mensaje);
+      agregarLogMemoria('exito', `✅ Mensaje entregado vía fallback a ${fallbackJid}`);
+    } catch (e2) {
+      agregarLogMemoria('error', `❌ Error enviando a ${cleanPhone}: ${e2.message}`);
+      throw e2;
+    }
   }
 }
 
