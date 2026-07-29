@@ -107,7 +107,7 @@ async function initWhatsAppWeb() {
     sock = null;
   }
 
-  agregarLogMemoria('info', '⚡ Inicializando motor Baileys WebSocket con extractor senderPn...');
+  agregarLogMemoria('info', '⚡ Inicializando motor Baileys WebSocket...');
   clientStatus = 'initializing';
 
   try {
@@ -346,7 +346,18 @@ async function enviarMensajeWWeb(sessionId, mensaje) {
     }
   }
 
-  const options = quotedMsg ? { quoted: quotedMsg } : {};
+  // Sincronizar el remoteJid del mensaje citado para que coincida exactamente con targetJid y evitar discrepancias de Meta
+  let options = {};
+  if (quotedMsg && quotedMsg.key) {
+    const cleanQuoted = {
+      ...quotedMsg,
+      key: {
+        ...quotedMsg.key,
+        remoteJid: targetJid
+      }
+    };
+    options = { quoted: cleanQuoted };
+  }
 
   agregarLogMemoria('enviando', `📤 Enviando respuesta a ${targetJid}...`);
 
@@ -355,11 +366,21 @@ async function enviarMensajeWWeb(sessionId, mensaje) {
     if (result && result.key && result.key.id) {
       botSentMsgIds.add(result.key.id);
     }
-    agregarLogMemoria('exito', `✅ Respuesta entregada con éxito al celular real ${targetJid}`);
+    agregarLogMemoria('exito', `✅ Respuesta entregada con éxito a ${targetJid}`);
     return result;
   } catch (err) {
-    agregarLogMemoria('error', `❌ Error enviando respuesta a ${targetJid}: ${err.message}`);
-    throw err;
+    // Si la cita falla por discrepancia, enviar como mensaje de texto directo
+    try {
+      const result = await sock.sendMessage(targetJid, { text: mensaje });
+      if (result && result.key && result.key.id) {
+        botSentMsgIds.add(result.key.id);
+      }
+      agregarLogMemoria('exito', `✅ Mensaje directo entregado con éxito a ${targetJid}`);
+      return result;
+    } catch (e2) {
+      agregarLogMemoria('error', `❌ Error enviando respuesta a ${targetJid}: ${e2.message}`);
+      throw e2;
+    }
   }
 }
 
