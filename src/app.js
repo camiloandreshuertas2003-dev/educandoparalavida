@@ -97,6 +97,18 @@ app.get('/qr/logs', (req, res) => {
   }
 });
 
+// Endpoint de prueba forzada para enviar un mensaje directo de WhatsApp a cualquier numero
+app.post('/api/admin/whatsapp-test', async (req, res) => {
+  const { telefono, mensaje } = req.body;
+  try {
+    const { enviarMensajeWWeb } = require('./services/whatsappWebService');
+    const result = await enviarMensajeWWeb(telefono || '3218423914', mensaje || '🧪 Prueba técnica de WhatsApp en vivo desde Contabo');
+    res.json({ success: true, result });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
 // Política de Privacidad para Meta WhatsApp Cloud API
 app.get('/politica-privacidad', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/politica-privacidad.html'));
