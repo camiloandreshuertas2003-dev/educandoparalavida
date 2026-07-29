@@ -50,14 +50,14 @@ function formatearJidInternacional(telefono) {
 }
 
 /**
- * Normalizar JID de cliente ignorando canales @newsletter y preservando direcciones @lid/@s.whatsapp.net
+ * Normalizar JID de cliente ignorando canales @newsletter y agrupando direcciones @s.whatsapp.net
  */
 function normalizarJidCliente(msg) {
   const remoteJid = msg.key.remoteJid || '';
   const participant = msg.key.participant || '';
   const remoteJidAlt = msg.key.remoteJidAlt || '';
 
-  // 1. Ignorar totalmente Canales de WhatsApp (Newsletters), Grupos y Transmisiones
+  // 1. Ignorar totalmente Canales de WhatsApp (@newsletter), Grupos y Transmisiones
   if (remoteJid.includes('@newsletter') || remoteJid.includes('@g.us') || remoteJid.includes('status@broadcast')) {
     return null;
   }
@@ -73,7 +73,7 @@ function normalizarJidCliente(msg) {
       return cleanPhone;
     }
 
-    // Si no hay remoteJidAlt, usar el JID de LID completo como destino de respuesta
+    // Registrar el LID y mapearlo
     contactJidMap.set(remoteJid, remoteJid);
     const rawLid = remoteJid.split('@')[0];
     contactJidMap.set(rawLid, remoteJid);
@@ -177,7 +177,6 @@ async function initWhatsAppWeb() {
         sock = null;
 
         if (statusCode === 440 || isLoggedOut) {
-          // Conflicto de sesión o cierre remoto: Reiniciar sesión limpiamente
           clientStatus = 'disconnected';
           userProfile = null;
           try {
@@ -193,16 +192,15 @@ async function initWhatsAppWeb() {
       }
     });
 
-    // Escuchar mensajes entrantes en tiempo real (filtrando Canales y Noticias)
+    // Escuchar mensajes entrantes en tiempo real
     sock.ev.on('messages.upsert', async (m) => {
       if (!m || !m.messages || m.messages.length === 0) return;
 
       for (const msg of m.messages) {
         if (!msg.message) continue;
-        if (msg.key.fromMe) continue; // Ignorar mensajes salientes enviados por el bot
+        if (msg.key.fromMe) continue; // Ignorar mensajes enviados por el mismo bot
 
         const remoteJid = msg.key.remoteJid || '';
-        // Filtrar inmediatamente si el mensaje proviene de un Canal de WhatsApp (@newsletter)
         if (remoteJid.includes('@newsletter') || remoteJid.includes('@g.us') || remoteJid.includes('status@broadcast')) {
           continue;
         }
@@ -234,7 +232,7 @@ async function initWhatsAppWeb() {
           }
         }
 
-        agregarLogMemoria('recibido', `📩 De ${fromNumber}: "${textoLimpio}"`);
+        agregarLogMemoria('recibido', `📩 De ${fromNumber} (JID: ${remoteJid}): "${textoLimpio}"`);
 
         const { procesarMensaje } = require('./conversationService');
         try {
@@ -315,30 +313,37 @@ async function enviarMensajeWWeb(telefono, mensaje) {
   }
 
   const cleanPhone = formatearJidInternacional(telefono);
-  let targetJid = contactJidMap.get(telefono) || contactJidMap.get(cleanPhone);
 
-  if (!targetJid) {
-    if (telefono.includes('@lid') || telefono.includes('@s.whatsapp.net')) {
-      targetJid = telefono;
-    } else if (cleanPhone.length > 13) {
-      targetJid = `${cleanPhone}@lid`;
-    } else {
-      targetJid = `${cleanPhone}@s.whatsapp.net`;
-    }
+  // 1. Buscar JID mapeado prioritario que termine en @s.whatsapp.net para asegurar renderizado visual en la app del cliente
+  let targetJid = contactJidMap.get(cleanPhone) || contactJidMap.get(telefono);
+
+  let phoneJid = null;
+  if (cleanPhone && cleanPhone.length <= 13 && !cleanPhone.includes('@')) {
+    phoneJid = `${cleanPhone}@s.whatsapp.net`;
   }
 
-  agregarLogMemoria('enviando', `📤 Enviando a ${cleanPhone} (${targetJid})...`);
+  const primarySendJid = (targetJid && targetJid.includes('@s.whatsapp.net')) ? targetJid : (phoneJid || targetJid || `${cleanPhone}@s.whatsapp.net`);
+
+  agregarLogMemoria('enviando', `📤 Enviando a ${cleanPhone} (${primarySendJid})...`);
 
   try {
-    const result = await sock.sendMessage(targetJid, { text: mensaje });
+    const result = await sock.sendMessage(primarySendJid, { text: mensaje });
     if (result && result.key && result.key.id) {
       botSentMsgIds.add(result.key.id);
     }
+
+    // 2. Si la direccion original era un @lid, enviar copia al @lid para garantizar sincronizacion multidevice
+    if (targetJid && targetJid.includes('@lid') && targetJid !== primarySendJid) {
+      try {
+        await sock.sendMessage(targetJid, { text: mensaje });
+      } catch (eLid) {}
+    }
+
     agregarLogMemoria('exito', `✅ Mensaje entregado a ${cleanPhone}`);
     return result;
   } catch (err) {
-    agregarLogMemoria('warn', `⚠️ Fallo envío primario a ${targetJid}, probando fallback...`);
-    const fallbackJid = targetJid.includes('@lid') ? targetJid : `${cleanPhone}@s.whatsapp.net`;
+    agregarLogMemoria('warn', `⚠️ Fallo envío a ${primarySendJid}, probando fallback...`);
+    const fallbackJid = (primarySendJid.includes('@lid') && phoneJid) ? phoneJid : `${cleanPhone}@s.whatsapp.net`;
     try {
       const result = await sock.sendMessage(fallbackJid, { text: mensaje });
       if (result && result.key && result.key.id) {
