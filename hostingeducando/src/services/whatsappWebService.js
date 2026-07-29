@@ -19,6 +19,21 @@ const lidToPhoneMap = new Map();
 const authFolder = path.join(__dirname, '../../.baileys_auth');
 
 /**
+ * Formatear cualquier número telefónico al estándar internacional de WhatsApp (@s.whatsapp.net)
+ */
+function formatearJidInternacional(telefono) {
+  let clean = (telefono || '').toString().replace(/[^\d]/g, '');
+  if (!clean) return '';
+
+  // Si es un número celular de Colombia de 10 dígitos que inicia con 3 (Ej: 3218423914)
+  if (clean.length === 10 && clean.startsWith('3')) {
+    clean = '57' + clean;
+  }
+
+  return clean;
+}
+
+/**
  * Resolver teléfono real unificado evitando descalces entre LIDs e identificadores de usuario
  */
 function normalizarTelefonoCliente(msg) {
@@ -30,7 +45,8 @@ function normalizarTelefonoCliente(msg) {
   const phoneJid = [remoteJidAlt, participant, remoteJid].find(j => j && j.includes('@s.whatsapp.net'));
   
   if (phoneJid) {
-    const cleanPhone = phoneJid.split('@')[0].split(':')[0].replace(/[^\d]/g, '');
+    const rawDigits = phoneJid.split('@')[0].split(':')[0].replace(/[^\d]/g, '');
+    const cleanPhone = formatearJidInternacional(rawDigits);
     if (cleanPhone && cleanPhone.length <= 13) {
       if (remoteJid.includes('@lid')) {
         const lidClean = remoteJid.split('@')[0];
@@ -43,7 +59,8 @@ function normalizarTelefonoCliente(msg) {
 
   // 2. Extraer del remoteJid principal
   const rawId = remoteJid.split('@')[0].split(':')[0].replace(/[^\d]/g, '');
-  
+  const cleanId = formatearJidInternacional(rawId);
+
   // 3. Si es un LID mapeado previamente a un teléfono real
   if (lidToPhoneMap.has(rawId)) {
     const realTel = lidToPhoneMap.get(rawId);
@@ -51,9 +68,9 @@ function normalizarTelefonoCliente(msg) {
     return realTel;
   }
 
-  const defaultJid = rawId.length <= 13 ? `${rawId}@s.whatsapp.net` : remoteJid;
-  contactJidMap.set(rawId, defaultJid);
-  return rawId;
+  const defaultJid = cleanId.length <= 13 ? `${cleanId}@s.whatsapp.net` : remoteJid;
+  contactJidMap.set(cleanId, defaultJid);
+  return cleanId;
 }
 
 async function initWhatsAppWeb() {
@@ -149,16 +166,16 @@ async function initWhatsAppWeb() {
       }
     });
 
-    // Escuchar mensajes entrantes de clientes
+    // Escuchar mensajes entrantes de clientes sin filtros restrictivos de notificacion
     sock.ev.on('messages.upsert', async (m) => {
       if (!m || !m.messages || m.messages.length === 0) return;
 
       for (const msg of m.messages) {
         if (!msg.message) continue;
-        if (msg.key.fromMe) continue;
+        if (msg.key.fromMe) continue; // Ignorar mensajes enviados por el mismo bot
 
         const remoteJid = msg.key.remoteJid;
-        if (!remoteJid || remoteJid.includes('@g.us')) continue; // Ignorar grupos
+        if (!remoteJid || remoteJid.includes('@g.us')) continue; // Ignorar chats grupales
 
         const msgId = msg.key.id;
         if (msgId && (processedMsgIds.has(msgId) || botSentMsgIds.has(msgId))) {
@@ -170,12 +187,13 @@ async function initWhatsAppWeb() {
           msg.message.extendedTextMessage?.text ||
           msg.message.buttonsResponseBodyText ||
           msg.message.listResponseBody?.singleSelectReply?.selectedRowId ||
+          msg.message.templateButtonReplyMessage?.selectedId ||
           '';
 
         const textoLimpio = textContent.trim();
         if (!textoLimpio) continue;
 
-        // Marcar msgId como procesado ÚNICAMENTE si contiene texto válido de cliente
+        // Registrar msgId como procesado ÚNICAMENTE si contiene texto válido de cliente
         if (msgId) {
           processedMsgIds.add(msgId);
           if (processedMsgIds.size > 2000) {
@@ -265,7 +283,7 @@ async function enviarMensajeWWeb(telefono, mensaje) {
     throw new Error('WhatsApp Web no está listo (el socket está desconectado)');
   }
 
-  const cleanPhone = telefono.toString().replace(/[^\d]/g, '');
+  const cleanPhone = formatearJidInternacional(telefono);
   let targetJid = contactJidMap.get(cleanPhone) || contactJidMap.get(telefono);
 
   if (!targetJid || targetJid.includes('@lid')) {
@@ -287,7 +305,7 @@ async function enviarMensajeWWeb(telefono, mensaje) {
     console.log(`📤 [WhatsApp Web Baileys] Mensaje enviado exitosamente a ${cleanPhone}`);
     return result;
   } catch (err) {
-    console.warn(`⚠️ Error enviando a ${targetJid}, intentando fallback a @s.whatsapp.net:`, err.message);
+    console.warn(`⚠️ Error enviando a ${targetJid}, intentando fallback directo a @s.whatsapp.net:`, err.message);
     const fallbackJid = `${cleanPhone}@s.whatsapp.net`;
     try {
       const result = await sock.sendMessage(fallbackJid, { text: mensaje });

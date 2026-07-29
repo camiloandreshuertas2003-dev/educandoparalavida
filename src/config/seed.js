@@ -7,12 +7,11 @@ function limpiarTextoParaMysql(str) {
 
 async function sembrarDatosIniciales() {
   try {
-    // Limpiar claves antiguas fuera del orden estricto de 4 pasos
-    const clavesNuevas = ['paso_1_bienvenida', 'paso_2_telefono', 'paso_3_grado', 'paso_4_despedida', 'bienvenida', 'solicitar_telefono', 'seleccion_grado', 'despedida'];
-    await pool.query('DELETE FROM bot_mensajes WHERE clave NOT IN (?, ?, ?, ?, ?, ?, ?, ?)', clavesNuevas);
+    // 1. Limpieza absoluta de claves viejas o duplicadas en bot_mensajes
+    await pool.query(`DELETE FROM bot_mensajes WHERE clave NOT IN ('paso_1_bienvenida', 'paso_2_telefono', 'paso_3_grado', 'paso_4_despedida')`);
 
-    // 1. Mensajes Administrables del Bot para los 4 pasos del flujo en estricto orden cronologico
-    const mensajesIniciales = [
+    // 2. Insertar o actualizar únicamente los 4 pasos exactos del flujo en orden id 1 a 4
+    const pasosOficiales = [
       [
         1,
         'paso_1_bienvenida',
@@ -39,17 +38,17 @@ async function sembrarDatosIniciales() {
       ]
     ];
 
-    for (const [id, clave, titulo, contenido] of mensajesIniciales) {
+    for (const [id, clave, titulo, contenido] of pasosOficiales) {
       const cleanContenido = limpiarTextoParaMysql(contenido);
       await pool.query(
         `INSERT INTO bot_mensajes (id, clave, titulo, contenido, activo) 
          VALUES (?, ?, ?, ?, TRUE) 
-         ON DUPLICATE KEY UPDATE id=?, clave=?, titulo=?, contenido=?`,
-        [id, clave, titulo, cleanContenido, id, clave, titulo, cleanContenido]
+         ON DUPLICATE KEY UPDATE clave=?, titulo=?, contenido=?`,
+        [id, clave, titulo, cleanContenido, clave, titulo, cleanContenido]
       );
     }
 
-    // 2. Base de Conocimiento (FAQs por defecto en MySQL)
+    // 3. Base de Conocimiento (FAQs por defecto en MySQL)
     const faqsIniciales = [
       ['Costos', '¿Cuáles son las pensiones, matrículas y costos?', '💡 En el Colegio Virtual Educando para la Vida 🎓 los costos son muy accesibles. Ofrecemos mensualidades económicas con facilidades de pago 💸. Al registrar sus datos en este WhatsApp, le enviaremos la tarifa exacta para su grado 📚.'],
       ['Metodología', '¿Cómo son las clases en vivo y los horarios?', '💻 Ofrecemos un modelo flexible 100% virtual con plataforma disponible 24/7, clases en vivo interactivas 🎥 y tutorías personalizadas para aprender a su propio ritmo ✨.'],
@@ -68,7 +67,7 @@ async function sembrarDatosIniciales() {
       );
     }
 
-    // 3. Grados Educativos (Oferta Académica sin emojis de 4 bytes)
+    // 4. Grados Educativos (Oferta Académica sin emojis de 4 bytes)
     const gradosIniciales = [
       [1, 1, 'Preescolar / Transicion', 1],
       [2, 2, 'Primaria (1 a 5)', 2],
@@ -87,7 +86,7 @@ async function sembrarDatosIniciales() {
       );
     }
 
-    console.log('✅ Pasos del Bot ordenados (1 al 4), FAQs y Grados restaurados exitosamente en MySQL');
+    console.log('✅ Base de datos sincronizada: Únicamente 4 pasos en bot_mensajes (ID 1-4), FAQs y Grados');
   } catch (err) {
     console.warn('⚠️ Nota sembrando datos iniciales:', err.message);
   }
