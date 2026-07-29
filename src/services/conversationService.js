@@ -48,7 +48,6 @@ async function obtenerTextoBot(clavePrincipal, claveSecundaria, fallbackDefault)
 
 /**
  * Buscar respuestas dinámicas NLU en la tabla `base_conocimiento` (FAQs) de MySQL
- * Tolerante a variaciones de palabras sin necesidad de signos de interrogación (?)
  */
 async function buscarEnBaseConocimiento(mensajeTexto) {
   if (!mensajeTexto) return null;
@@ -109,20 +108,6 @@ async function buscarEnBaseConocimiento(mensajeTexto) {
     }
   } catch (err) {
     console.warn('⚠️ Nota consultando Base de Conocimiento en MySQL:', err.message);
-  }
-
-  // Respuestas predeterminadas institucionales si la BD se encuentra en inicialización
-  if (textoNorm.includes('precio')) {
-    return '💡 En el Colegio Virtual Educando para la Vida 🎓 los costos son muy accesibles. Ofrecemos mensualidades económicas con facilidades de pago 💸. Al registrar sus datos, le enviaremos la tarifa exacta para su grado 📚.';
-  }
-  if (textoNorm.includes('vivo')) {
-    return '💻 Ofrecemos un modelo flexible 100% virtual con plataforma disponible 24/7, clases en vivo interactivas 🎥 y tutorías personalizadas para aprender a su propio ritmo ✨.';
-  }
-  if (textoNorm.includes('titulo')) {
-    return '📜 Contamos con resolución oficial expedida por la Secretaría de Educación conforme a la Ley 115. El título de Bachiller es 100% legal y válido para ingresar a cualquier universidad 🏛️✨.';
-  }
-  if (textoNorm.includes('requisito')) {
-    return '📋 Se requiere fotocopia del documento de identidad del estudiante y acudiente 📄, certificado del último año cursado y recibo de pago de matrícula ✍️.';
   }
 
   return null;
@@ -303,7 +288,7 @@ async function resetearConversacionLimpia(sessionId) {
 }
 
 /**
- * Procesar mensaje NLU directo utilizando únicamente los mensajes de la tabla `bot_mensajes` y `base_conocimiento`
+ * Procesar mensaje NLU directo con validaciones estrictas de Nombre y Teléfono
  */
 async function procesarMensaje(sessionId, mensajeTexto) {
   const textoLimpio = mensajeTexto ? mensajeTexto.trim() : '';
@@ -326,23 +311,25 @@ async function procesarMensaje(sessionId, mensajeTexto) {
     }
 
     case 'nombre': {
-      if (!textoLimpio) {
-        const msg = '✍️ Por favor indique su *Nombre Completo* (Nombres y Apellidos) para continuar su solicitud:';
+      // 1. Validar que no sea un saludo o palabra genérica como 'hola', 'ayuda', 'info'
+      const palabrasGenericas = ['hola', 'buenas', 'informacion', 'ayuda', 'ayudame', 'info', 'saludos', 'buenos dias', 'buenas tardes', 'hey'];
+      if (!textoLimpio || textoNorm.length < 2 || palabrasGenericas.includes(textoNorm)) {
+        // Responder FAQ si hizo una pregunta antes de dar el nombre
+        const respuestaFaq = await buscarEnBaseConocimiento(textoLimpio);
+        if (respuestaFaq) {
+          const msgFaq = `${respuestaFaq}\n\n✍️ Para continuar con su registro, por favor indique su *Nombre Completo* (Nombres y Apellidos):`;
+          await enviarTexto(sessionId, msgFaq);
+          await registrarLog(sessionId, 'saliente', msgFaq);
+          return;
+        }
+
+        const msg = '✍️ Para iniciar su registro, por favor indique su *Nombre Completo* (Ejemplo: Juan Carlos Pérez):';
         await enviarTexto(sessionId, msg);
         await registrarLog(sessionId, 'saliente', msg);
         return;
       }
 
-      // Responder FAQ desde MySQL si el cliente hace una pregunta antes de dar su nombre
-      const respuestaFaq = await buscarEnBaseConocimiento(textoLimpio);
-      if (respuestaFaq) {
-        const msgFaq = `${respuestaFaq}\n\n✍️ Para continuar con su registro, por favor indique su *Nombre Completo* (Nombres y Apellidos):`;
-        await enviarTexto(sessionId, msgFaq);
-        await registrarLog(sessionId, 'saliente', msgFaq);
-        return;
-      }
-
-      // Guardar Nombre y solicitar número telefónico usando el paso 2 administrable en MySQL
+      // Guardar Nombre válido y solicitar número telefónico usando el paso 2 administrable en MySQL
       estado = await actualizarConversacion(sessionId, {
         nombre_temp: textoLimpio,
         paso_actual: 'telefono'
@@ -359,25 +346,28 @@ async function procesarMensaje(sessionId, mensajeTexto) {
     }
 
     case 'telefono': {
-      if (!textoLimpio) {
-        const msg = '📱 Por favor ingrese su *Número de Teléfono / Celular de Contacto* (Ejemplo: 3218423914):';
+      // Validar que el texto ingresado contenga al menos 7 dígitos telefónicos
+      const digitos = textoLimpio.replace(/[^\d]/g, '');
+
+      if (!digitos || digitos.length < 7) {
+        // Responder FAQ si el cliente hace una pregunta antes de dar su número
+        const respuestaFaq = await buscarEnBaseConocimiento(textoLimpio);
+        if (respuestaFaq) {
+          const msgFaq = `${respuestaFaq}\n\n📱 Para continuar, por favor escriba su *Número de Teléfono / Celular de Contacto* (Ejemplo: 3218423914):`;
+          await enviarTexto(sessionId, msgFaq);
+          await registrarLog(sessionId, 'saliente', msgFaq);
+          return;
+        }
+
+        const msg = '📱 Por favor ingrese su *Número de Teléfono / Celular de Contacto válido* (Ejemplo: 3218423914):';
         await enviarTexto(sessionId, msg);
         await registrarLog(sessionId, 'saliente', msg);
         return;
       }
 
-      // Responder FAQ desde MySQL si el cliente hace una pregunta antes de dar su número
-      const respuestaFaq = await buscarEnBaseConocimiento(textoLimpio);
-      if (respuestaFaq) {
-        const msgFaq = `${respuestaFaq}\n\n📱 Para continuar, por favor escriba su *Número de Teléfono / Celular de Contacto* (Ejemplo: 3218423914):`;
-        await enviarTexto(sessionId, msgFaq);
-        await registrarLog(sessionId, 'saliente', msgFaq);
-        return;
-      }
-
       // Guardar el número ingresado manualmente y enviar el menú de Grados de MySQL
       estado = await actualizarConversacion(sessionId, {
-        telefono_temp: textoLimpio,
+        telefono_temp: digitos,
         paso_actual: 'programa'
       });
 
