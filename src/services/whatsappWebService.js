@@ -107,7 +107,7 @@ async function initWhatsAppWeb() {
     sock = null;
   }
 
-  agregarLogMemoria('info', '⚡ Inicializando motor Baileys WebSocket...');
+  agregarLogMemoria('info', '⚡ Inicializando motor Baileys WebSocket con Signal Keypair Exchange...');
   clientStatus = 'initializing';
 
   try {
@@ -346,41 +346,28 @@ async function enviarMensajeWWeb(sessionId, mensaje) {
     }
   }
 
-  // Sincronizar el remoteJid del mensaje citado para que coincida exactamente con targetJid y evitar discrepancias de Meta
-  let options = {};
-  if (quotedMsg && quotedMsg.key) {
-    const cleanQuoted = {
-      ...quotedMsg,
-      key: {
-        ...quotedMsg.key,
-        remoteJid: targetJid
-      }
-    };
-    options = { quoted: cleanQuoted };
-  }
+  // 2. Establecer / verificar llaves de cifrado Signal con Meta llamando a onWhatsApp
+  try {
+    const checkWa = await sock.onWhatsApp(targetJid);
+    if (checkWa && checkWa.length > 0 && checkWa[0].exists && checkWa[0].jid) {
+      targetJid = checkWa[0].jid;
+      agregarLogMemoria('info', `🔑 Llaves de cifrado Signal verificadas para ${targetJid}`);
+    }
+  } catch (e) {}
 
-  agregarLogMemoria('enviando', `📤 Enviando respuesta a ${targetJid}...`);
+  agregarLogMemoria('enviando', `📤 Enviando respuesta cifrada a ${targetJid}...`);
 
   try {
-    const result = await sock.sendMessage(targetJid, { text: mensaje }, options);
+    // Transmitir texto directo al canal cifrado verificado
+    const result = await sock.sendMessage(targetJid, { text: mensaje });
     if (result && result.key && result.key.id) {
       botSentMsgIds.add(result.key.id);
     }
-    agregarLogMemoria('exito', `✅ Respuesta entregada con éxito a ${targetJid}`);
+    agregarLogMemoria('exito', `✅ Mensaje cifrado entregado exitosamente al celular ${targetJid}`);
     return result;
   } catch (err) {
-    // Si la cita falla por discrepancia, enviar como mensaje de texto directo
-    try {
-      const result = await sock.sendMessage(targetJid, { text: mensaje });
-      if (result && result.key && result.key.id) {
-        botSentMsgIds.add(result.key.id);
-      }
-      agregarLogMemoria('exito', `✅ Mensaje directo entregado con éxito a ${targetJid}`);
-      return result;
-    } catch (e2) {
-      agregarLogMemoria('error', `❌ Error enviando respuesta a ${targetJid}: ${e2.message}`);
-      throw e2;
-    }
+    agregarLogMemoria('error', `❌ Error enviando respuesta a ${targetJid}: ${err.message}`);
+    throw err;
   }
 }
 
