@@ -86,6 +86,17 @@ app.post('/api/admin/qr-logout', async (req, res) => {
   }
 });
 
+// Endpoint de depuración en vivo para ver la actividad del Bot en tiempo real
+app.get('/qr/logs', (req, res) => {
+  try {
+    const { obtenerLogsMemoria } = require('./services/whatsappWebService');
+    const logs = obtenerLogsMemoria();
+    res.json({ count: logs.length, logs });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Política de Privacidad para Meta WhatsApp Cloud API
 app.get('/politica-privacidad', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/politica-privacidad.html'));

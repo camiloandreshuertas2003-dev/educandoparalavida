@@ -16,6 +16,23 @@ const botSentMsgIds = new Set();
 const contactJidMap = new Map();
 const lidToPhoneMap = new Map();
 
+// Registro de Logs en Memoria para depuración gráfica en vivo en el navegador
+const logsEnMemoria = [];
+
+function agregarLogMemoria(tipo, mensaje) {
+  const timestamp = new Date().toLocaleTimeString('es-CO');
+  const logItem = `[${timestamp}] [${tipo.toUpperCase()}] ${mensaje}`;
+  console.log(logItem);
+  logsEnMemoria.unshift(logItem);
+  if (logsEnMemoria.length > 100) {
+    logsEnMemoria.pop();
+  }
+}
+
+function obtenerLogsMemoria() {
+  return logsEnMemoria;
+}
+
 const authFolder = path.join(__dirname, '../../.baileys_auth');
 
 /**
@@ -74,11 +91,20 @@ function normalizarTelefonoCliente(msg) {
 }
 
 async function initWhatsAppWeb() {
-  if (sock) {
+  if (sock && clientStatus === 'ready') {
     return sock;
   }
 
-  console.log('⚡ Inicializando motor ultra-liviano WhatsApp Web (Baileys WebSocket)...');
+  // Si existe un socket antiguo no listo, cerrarlo limpiamente antes de reconectar
+  if (sock && clientStatus !== 'ready') {
+    try {
+      sock.ev.removeAllListeners();
+      sock.ws.close();
+    } catch (e) {}
+    sock = null;
+  }
+
+  agregarLogMemoria('info', '⚡ Inicializando motor Baileys WebSocket...');
   clientStatus = 'initializing';
 
   try {
@@ -102,9 +128,7 @@ async function initWhatsAppWeb() {
       const { connection, lastDisconnect, qr } = update;
 
       if (qr) {
-        console.log('===================================================');
-        console.log('📱 ¡NUEVO CÓDIGO QR GENERADO DE WHATSAPP WEB!');
-        console.log('===================================================');
+        agregarLogMemoria('qr', '📱 Código QR listo para escanear');
         currentQrCode = qr;
         clientStatus = 'qr_ready';
         qrcodeTerminal.generate(qr, { small: true });
@@ -112,7 +136,7 @@ async function initWhatsAppWeb() {
         try {
           currentQrDataUri = await QRCode.toDataURL(qr);
         } catch (err) {
-          console.error('Error generando Data URI del QR:', err.message);
+          agregarLogMemoria('error', `Error generando Data URI QR: ${err.message}`);
         }
       }
 
@@ -123,7 +147,6 @@ async function initWhatsAppWeb() {
       }
 
       if (connection === 'open') {
-        console.log('🎉 ¡WHATSAPP WEB CLIENTE LISTO Y CONECTADO 100%! (Baileys WebSocket Active)');
         clientStatus = 'ready';
         currentQrCode = null;
         currentQrDataUri = null;
@@ -135,15 +158,17 @@ async function initWhatsAppWeb() {
             name: sock.user ? (sock.user.name || 'Colegio Educando para la Vida') : 'Colegio Educando para la Vida',
             phone: cleanPhone
           };
-          console.log(`📱 Sesión iniciada como: ${userProfile.name} (+${userProfile.phone})`);
-        } catch (e) {}
+          agregarLogMemoria('exito', `🎉 Sesión WhatsApp lista para: ${userProfile.name} (+${userProfile.phone})`);
+        } catch (e) {
+          agregarLogMemoria('exito', '🎉 Sesión WhatsApp conectada y lista 100%');
+        }
       }
 
       if (connection === 'close') {
         const statusCode = lastDisconnect?.error?.output?.statusCode;
         const isLoggedOut = statusCode === DisconnectReason.loggedOut;
 
-        console.warn(`⚠️ Conexión de WhatsApp cerrada (Código ${statusCode}). Reorganizando sesión...`);
+        agregarLogMemoria('warn', `⚠️ Conexión de WhatsApp cerrada (Código ${statusCode || 'desconocido'})`);
 
         currentQrCode = null;
         currentQrDataUri = null;
@@ -166,7 +191,7 @@ async function initWhatsAppWeb() {
       }
     });
 
-    // Escuchar mensajes entrantes de clientes sin filtros restrictivos de notificacion
+    // Escuchar mensajes entrantes de clientes en tiempo real
     sock.ev.on('messages.upsert', async (m) => {
       if (!m || !m.messages || m.messages.length === 0) return;
 
@@ -176,11 +201,6 @@ async function initWhatsAppWeb() {
 
         const remoteJid = msg.key.remoteJid;
         if (!remoteJid || remoteJid.includes('@g.us')) continue; // Ignorar chats grupales
-
-        const msgId = msg.key.id;
-        if (msgId && (processedMsgIds.has(msgId) || botSentMsgIds.has(msgId))) {
-          continue;
-        }
 
         const textContent =
           msg.message.conversation ||
@@ -193,29 +213,20 @@ async function initWhatsAppWeb() {
         const textoLimpio = textContent.trim();
         if (!textoLimpio) continue;
 
-        // Registrar msgId como procesado ÚNICAMENTE si contiene texto válido de cliente
-        if (msgId) {
-          processedMsgIds.add(msgId);
-          if (processedMsgIds.size > 2000) {
-            const first = processedMsgIds.values().next().value;
-            processedMsgIds.delete(first);
-          }
-        }
-
         const fromNumber = normalizarTelefonoCliente(msg);
-        console.log(`📩 [WhatsApp Web Baileys] Mensaje entrante de ${fromNumber} (${msgId}): "${textoLimpio}"`);
+        agregarLogMemoria('recibido', `📩 De ${fromNumber}: "${textoLimpio}"`);
 
         const { procesarMensaje } = require('./conversationService');
         try {
           await procesarMensaje(fromNumber, textoLimpio);
         } catch (err) {
-          console.error(`❌ Error procesando mensaje de ${fromNumber}:`, err.message);
+          agregarLogMemoria('error', `❌ Error procesando mensaje de ${fromNumber}: ${err.message}`);
         }
       }
     });
 
   } catch (err) {
-    console.error('❌ Error inicializando Baileys WhatsApp:', err.message);
+    agregarLogMemoria('error', `❌ Error inicializando Baileys: ${err.message}`);
     clientStatus = 'disconnected';
     sock = null;
   }
@@ -245,7 +256,7 @@ function isWhatsAppWebReady() {
 }
 
 async function logoutWhatsAppWeb() {
-  console.log('🔴 Cerrando sesión de WhatsApp Web y eliminando credenciales Baileys...');
+  agregarLogMemoria('info', '🔴 Cerrando sesión de WhatsApp Web y reiniciando...');
   if (sock) {
     try {
       await sock.logout();
@@ -272,7 +283,6 @@ async function logoutWhatsAppWeb() {
 }
 
 async function enviarMensajeWWeb(telefono, mensaje) {
-  // Esperar hasta 5 segundos si el socket se está estabilizando
   let retries = 0;
   while (!isWhatsAppWebReady() && retries < 10) {
     await new Promise((res) => setTimeout(res, 500));
@@ -280,6 +290,7 @@ async function enviarMensajeWWeb(telefono, mensaje) {
   }
 
   if (!sock) {
+    agregarLogMemoria('error', `❌ No se pudo enviar mensaje a ${telefono}: Socket desconectado`);
     throw new Error('WhatsApp Web no está listo (el socket está desconectado)');
   }
 
@@ -295,27 +306,27 @@ async function enviarMensajeWWeb(telefono, mensaje) {
     }
   }
 
-  console.log(`📤 [WhatsApp Web Baileys] Enviando mensaje a ${cleanPhone} (JID: ${targetJid})...`);
+  agregarLogMemoria('enviando', `📤 Enviando a ${cleanPhone} (${targetJid})...`);
 
   try {
     const result = await sock.sendMessage(targetJid, { text: mensaje });
     if (result && result.key && result.key.id) {
       botSentMsgIds.add(result.key.id);
     }
-    console.log(`📤 [WhatsApp Web Baileys] Mensaje enviado exitosamente a ${cleanPhone}`);
+    agregarLogMemoria('exito', `✅ Mensaje entregado a ${cleanPhone}`);
     return result;
   } catch (err) {
-    console.warn(`⚠️ Error enviando a ${targetJid}, intentando fallback directo a @s.whatsapp.net:`, err.message);
+    agregarLogMemoria('warn', `⚠️ Fallo envío primario a ${targetJid}, probando fallback...`);
     const fallbackJid = `${cleanPhone}@s.whatsapp.net`;
     try {
       const result = await sock.sendMessage(fallbackJid, { text: mensaje });
       if (result && result.key && result.key.id) {
         botSentMsgIds.add(result.key.id);
       }
-      console.log(`📤 [WhatsApp Web Baileys] Mensaje enviado exitosamente vía fallback a ${cleanPhone}`);
+      agregarLogMemoria('exito', `✅ Mensaje entregado vía fallback a ${cleanPhone}`);
       return result;
     } catch (e2) {
-      console.error(`❌ Error definitivo enviando mensaje a ${cleanPhone}:`, e2.message);
+      agregarLogMemoria('error', `❌ Error enviando a ${cleanPhone}: ${e2.message}`);
       throw e2;
     }
   }
@@ -326,5 +337,6 @@ module.exports = {
   getWWebStatus,
   isWhatsAppWebReady,
   logoutWhatsAppWeb,
-  enviarMensajeWWeb
+  enviarMensajeWWeb,
+  obtenerLogsMemoria
 };
