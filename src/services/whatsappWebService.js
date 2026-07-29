@@ -14,7 +14,6 @@ let userProfile = null;
 const processedMsgIds = new Set();
 const botSentMsgIds = new Set();
 const contactJidMap = new Map();
-const lastMsgMap = new Map();
 
 // Registro de Logs en Memoria para depuración gráfica en vivo en el navegador
 const logsEnMemoria = [];
@@ -50,48 +49,32 @@ function formatearJidInternacional(telefono) {
 }
 
 /**
- * Extraer la dirección telefónica real de celular (@s.whatsapp.net) desde el objeto de mensaje
+ * Extraer el número de celular real del cliente
  */
-function obtenerJidCelularReal(msg) {
+function obtenerTelefonoCliente(msg) {
   if (!msg || !msg.key) return null;
 
-  // 1. Usar senderPn (Sender Phone Number) provisto nativamente por WhatsApp Meta en msg.key
-  if (msg.key.senderPn && typeof msg.key.senderPn === 'string' && msg.key.senderPn.includes('@s.whatsapp.net')) {
-    return msg.key.senderPn;
-  }
-
-  // 2. Usar remoteJidAlt o participant
-  const candidates = [msg.key.remoteJidAlt, msg.key.participant, msg.participant].filter(
-    j => j && typeof j === 'string' && j.includes('@s.whatsapp.net')
-  );
-  if (candidates.length > 0) {
-    return candidates[0];
-  }
-
-  // 3. Si remoteJid ya es una dirección de celular directa
-  const remoteJid = msg.key.remoteJid || '';
-  if (remoteJid.includes('@s.whatsapp.net')) {
-    return remoteJid;
-  }
-
-  return null;
-}
-
-/**
- * Normalizar JID de cliente ignorando canales @newsletter y grupos
- */
-function normalizarJidCliente(msg) {
   const remoteJid = msg.key.remoteJid || '';
 
+  // Ignorar Canales, Grupos y Transmisiones
   if (remoteJid.includes('@newsletter') || remoteJid.includes('@g.us') || remoteJid.includes('status@broadcast')) {
     return null;
   }
 
-  const realPhoneJid = obtenerJidCelularReal(msg);
-  const targetForDigits = realPhoneJid || remoteJid;
-  const rawDigits = targetForDigits.split('@')[0].split(':')[0].replace(/[^\d]/g, '');
+  // 1. Extraer senderPn (Sender Phone Number) provisto por WhatsApp Meta si viene enmascarado
+  let rawJid = msg.key.senderPn || msg.key.remoteJidAlt || msg.key.participant || remoteJid;
+
+  const rawDigits = rawJid.split('@')[0].split(':')[0].replace(/[^\d]/g, '');
   const cleanPhone = formatearJidInternacional(rawDigits);
-  return cleanPhone || rawDigits;
+
+  if (cleanPhone) {
+    const targetJid = `${cleanPhone}@s.whatsapp.net`;
+    contactJidMap.set(cleanPhone, targetJid);
+    contactJidMap.set(remoteJid, targetJid);
+    return cleanPhone;
+  }
+
+  return rawDigits;
 }
 
 async function initWhatsAppWeb() {
@@ -107,7 +90,7 @@ async function initWhatsAppWeb() {
     sock = null;
   }
 
-  agregarLogMemoria('info', '⚡ Inicializando motor Baileys WebSocket con regla de presencia composing...');
+  agregarLogMemoria('info', '⚡ Inicializando motor Baileys WebSocket original...');
   clientStatus = 'initializing';
 
   try {
@@ -188,7 +171,7 @@ async function initWhatsAppWeb() {
           setTimeout(() => initWhatsAppWeb(), 3000);
         } else {
           clientStatus = 'initializing';
-          setTimeout(() => initWhatsAppWeb(), 3000);
+          setTimeout(() => initWhatsAppWeb(), 2000);
         }
       }
     });
@@ -222,22 +205,8 @@ async function initWhatsAppWeb() {
         const textoLimpio = textContent.trim();
         if (!textoLimpio) continue;
 
-        // Extraer el teléfono celular real de senderPn (ej: 573027476086@s.whatsapp.net)
-        const realPhoneJid = obtenerJidCelularReal(msg);
-        const fromNumber = normalizarJidCliente(msg);
-
+        const fromNumber = obtenerTelefonoCliente(msg);
         if (!fromNumber) continue;
-
-        if (realPhoneJid) {
-          contactJidMap.set(fromNumber, realPhoneJid);
-          contactJidMap.set(remoteJid, realPhoneJid);
-          agregarLogMemoria('info', `🎯 Celular real detectado vía senderPn: ${fromNumber} -> ${realPhoneJid}`);
-        }
-
-        // Guardar referencia del mensaje entrante
-        lastMsgMap.set(fromNumber, msg);
-        lastMsgMap.set(remoteJid, msg);
-        if (realPhoneJid) lastMsgMap.set(realPhoneJid, msg);
 
         if (msgId) {
           processedMsgIds.add(msgId);
@@ -247,7 +216,7 @@ async function initWhatsAppWeb() {
           }
         }
 
-        agregarLogMemoria('recibido', `📩 De ${fromNumber} (JID real: ${realPhoneJid || remoteJid}): "${textoLimpio}"`);
+        agregarLogMemoria('recibido', `📩 De ${fromNumber}: "${textoLimpio}"`);
 
         const { procesarMensaje } = require('./conversationService');
         try {
@@ -315,7 +284,7 @@ async function logoutWhatsAppWeb() {
   return { status: 'disconnected', message: 'Sesión de WhatsApp cerrada exitosamente' };
 }
 
-async function enviarMensajeWWeb(sessionId, mensaje) {
+async function enviarMensajeWWeb(telefono, mensaje) {
   let retries = 0;
   while (!isWhatsAppWebReady() && retries < 10) {
     await new Promise((res) => setTimeout(res, 500));
@@ -323,48 +292,29 @@ async function enviarMensajeWWeb(sessionId, mensaje) {
   }
 
   if (!sock) {
-    agregarLogMemoria('error', `❌ No se pudo enviar mensaje a ${sessionId}: Socket desconectado`);
+    agregarLogMemoria('error', `❌ No se pudo enviar mensaje a ${telefono}: Socket desconectado`);
     throw new Error('WhatsApp Web no está listo (el socket está desconectado)');
   }
 
-  // 1. Buscar la dirección telefónica real @s.whatsapp.net extraída de senderPn
-  let targetJid = contactJidMap.get(sessionId);
-
-  const quotedMsg = lastMsgMap.get(sessionId);
-  if (!targetJid && quotedMsg) {
-    targetJid = obtenerJidCelularReal(quotedMsg);
-  }
+  const cleanPhone = formatearJidInternacional(telefono);
+  let targetJid = contactJidMap.get(cleanPhone) || contactJidMap.get(telefono);
 
   if (!targetJid) {
-    const cleanPhone = formatearJidInternacional(sessionId);
-    if (cleanPhone && cleanPhone.length <= 13 && !cleanPhone.includes('@')) {
-      targetJid = `${cleanPhone}@s.whatsapp.net`;
-    } else if (quotedMsg && quotedMsg.key && quotedMsg.key.remoteJid) {
-      targetJid = quotedMsg.key.remoteJid;
-    } else {
-      targetJid = sessionId;
-    }
+    targetJid = `${cleanPhone}@s.whatsapp.net`;
   }
 
-  // 2. REGLA PROTOCOLAR BAILEYS: Enviar presencia de escritura 'composing' para activar la ventana del chat en el celular
-  try {
-    await sock.sendPresenceUpdate('composing', targetJid);
-    await new Promise((res) => setTimeout(res, 800));
-    await sock.sendPresenceUpdate('paused', targetJid);
-  } catch (e) {}
-
-  agregarLogMemoria('enviando', `📤 Transmitiendo respuesta a ${targetJid}...`);
+  agregarLogMemoria('enviando', `📤 Enviando a ${cleanPhone} (${targetJid})...`);
 
   try {
-    // 3. Transmitir texto directo al canal activado
+    // Envío directo simple y limpio de 1 sola línea idéntico al Día 1
     const result = await sock.sendMessage(targetJid, { text: mensaje });
     if (result && result.key && result.key.id) {
       botSentMsgIds.add(result.key.id);
     }
-    agregarLogMemoria('exito', `✅ Mensaje entregado con éxito en pantalla a ${targetJid}`);
+    agregarLogMemoria('exito', `✅ Mensaje entregado a ${cleanPhone}`);
     return result;
   } catch (err) {
-    agregarLogMemoria('error', `❌ Error enviando respuesta a ${targetJid}: ${err.message}`);
+    agregarLogMemoria('error', `❌ Error enviando a ${cleanPhone}: ${err.message}`);
     throw err;
   }
 }
