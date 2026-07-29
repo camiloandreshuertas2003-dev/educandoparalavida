@@ -36,9 +36,9 @@ async function enviarTexto(sessionId, mensaje) {
 /**
  * Obtener texto administrable desde la tabla `bot_mensajes` en MySQL
  */
-async function obtenerTextoBot(clave, fallbackDefault) {
+async function obtenerTextoBot(clavePrincipal, claveSecundaria, fallbackDefault) {
   try {
-    const [rows] = await pool.query('SELECT contenido FROM bot_mensajes WHERE clave = ? AND activo = TRUE', [clave]);
+    const [rows] = await pool.query('SELECT contenido FROM bot_mensajes WHERE (clave = ? OR clave = ?) AND activo = TRUE ORDER BY id ASC LIMIT 1', [clavePrincipal, claveSecundaria || clavePrincipal]);
     if (rows && rows.length > 0 && rows[0].contenido) {
       return rows[0].contenido;
     }
@@ -154,6 +154,7 @@ async function obtenerGradosDinamicos() {
 async function enviarListaGrados(sessionId) {
   const grados = await obtenerGradosDinamicos();
   const tituloGrados = await obtenerTextoBot(
+    'paso_3_grado',
     'seleccion_grado',
     '🎓 Seleccione el *Grado Educativo* de su interés enviando el número correspondiente 👇:'
   );
@@ -286,6 +287,7 @@ async function resetearConversacionLimpia(sessionId) {
   } catch (e) {}
 
   const bienvenidaBD = await obtenerTextoBot(
+    'paso_1_bienvenida',
     'bienvenida',
     '👋 ¡Hola! Bienvenido al Colegio Virtual Educando para la Vida 🎓✨. Somos una institución educativa 100% autorizada por la Secretaría de Educación 📚.\n\nPara iniciar su registro, ¿cuál es su *Nombre Completo* (Nombres y Apellidos)? ✍️'
   );
@@ -347,6 +349,7 @@ async function procesarMensaje(sessionId, mensajeTexto) {
       });
 
       const msgTel = await obtenerTextoBot(
+        'paso_2_telefono',
         'solicitar_telefono',
         '📱 Por favor escriba su *Número de Teléfono / Celular de Contacto* para enviarle la información oficial (Ejemplo: 3218423914): ✍️'
       );
@@ -426,6 +429,7 @@ async function procesarMensaje(sessionId, mensajeTexto) {
 
         // C. Enviar mensaje final de agradecimiento e inscripción oficial administrable desde MySQL
         const confirmacionBase = await obtenerTextoBot(
+          'paso_4_despedida',
           'despedida',
           `🎉 ¡Muchas gracias, ${nombreFinal}! ✨ Hemos registrado exitosamente su inscripción para el programa: *${gradoFinal}* 🎓. Un asesor académico de admisiones se comunicará con usted al teléfono *${telManualFinal}* 📲.`
         );

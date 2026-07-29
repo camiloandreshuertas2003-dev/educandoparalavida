@@ -968,10 +968,20 @@
           <td><strong>${m.titulo}</strong></td>
           <td style="max-width:350px; white-space:pre-wrap;">${m.contenido}</td>
           <td>
-            <button class="btn btn-sm btn-secondary" onclick="modalEditarBotMsg(${m.id}, '${encodeURIComponent(m.clave)}', '${encodeURIComponent(m.titulo)}', '${encodeURIComponent(m.contenido)}')"><svg class="icon"><use href="#icon-edit"/></svg> Editar</button>
+            <div style="display:flex; gap:6px;">
+              <button class="btn btn-sm btn-secondary" onclick="modalEditarBotMsg(${m.id}, '${encodeURIComponent(m.clave)}', '${encodeURIComponent(m.titulo)}', '${encodeURIComponent(m.contenido)}')"><svg class="icon"><use href="#icon-edit"/></svg> Editar</button>
+              <button class="btn btn-sm btn-danger" onclick="eliminarBotMsg(${m.id})"><svg class="icon"><use href="#icon-trash"/></svg> Eliminar</button>
+            </div>
           </td>
         </tr>
       `).join('');
+    }
+
+    async function eliminarBotMsg(id) {
+      if (solicitarPinProteccion()) {
+        await apiFetch(`/api/admin/bot-mensajes/${id}`, { method: 'DELETE' });
+        fetchBot();
+      }
     }
 
     function modalEditarBotMsg(id, claveEnc, tituloEnc, contEnc) {

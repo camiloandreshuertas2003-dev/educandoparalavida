@@ -7,37 +7,45 @@ function limpiarTextoParaMysql(str) {
 
 async function sembrarDatosIniciales() {
   try {
-    // 1. Mensajes Administrables del Bot para cada paso del flujo principal
+    // Limpiar claves antiguas fuera del orden estricto de 4 pasos
+    const clavesNuevas = ['paso_1_bienvenida', 'paso_2_telefono', 'paso_3_grado', 'paso_4_despedida', 'bienvenida', 'solicitar_telefono', 'seleccion_grado', 'despedida'];
+    await pool.query('DELETE FROM bot_mensajes WHERE clave NOT IN (?, ?, ?, ?, ?, ?, ?, ?)', clavesNuevas);
+
+    // 1. Mensajes Administrables del Bot para los 4 pasos del flujo en estricto orden cronologico
     const mensajesIniciales = [
       [
-        'bienvenida',
+        1,
+        'paso_1_bienvenida',
         'Paso 1: Saludo y Solicitud de Nombre Completo',
         '👋 ¡Hola! Bienvenido al Colegio Virtual Educando para la Vida 🎓✨. Somos una institución educativa 100% autorizada por la Secretaría de Educación 📚.\n\nPara iniciar su registro, ¿cuál es su *Nombre Completo* (Nombres y Apellidos)? ✍️'
       ],
       [
-        'solicitar_telefono',
+        2,
+        'paso_2_telefono',
         'Paso 2: Solicitud de Número Telefónico de Contacto',
         '📱 Por favor escriba su *Número de Teléfono / Celular de Contacto* para enviarle la información oficial (Ejemplo: 3218423914): ✍️'
       ],
       [
-        'seleccion_grado',
+        3,
+        'paso_3_grado',
         'Paso 3: Cabecera Menú de Oferta Académica de Grados',
         '🎓 Seleccione el *Grado Educativo* de su interés enviando el número correspondiente 👇:'
       ],
       [
-        'despedida',
+        4,
+        'paso_4_despedida',
         'Paso 4: Confirmación Final de Inscripción Exitosa',
         '🎉 ¡Muchas gracias! Hemos registrado exitosamente su solicitud de inscripción 🎓. Un asesor académico de admisiones se comunicará con usted a la brevedad 📲.'
       ]
     ];
 
-    for (const [clave, titulo, contenido] of mensajesIniciales) {
+    for (const [id, clave, titulo, contenido] of mensajesIniciales) {
       const cleanContenido = limpiarTextoParaMysql(contenido);
       await pool.query(
-        `INSERT INTO bot_mensajes (clave, titulo, contenido, activo) 
-         VALUES (?, ?, ?, TRUE) 
-         ON DUPLICATE KEY UPDATE titulo=?, contenido=?`,
-        [clave, titulo, cleanContenido, titulo, cleanContenido]
+        `INSERT INTO bot_mensajes (id, clave, titulo, contenido, activo) 
+         VALUES (?, ?, ?, ?, TRUE) 
+         ON DUPLICATE KEY UPDATE id=?, clave=?, titulo=?, contenido=?`,
+        [id, clave, titulo, cleanContenido, id, clave, titulo, cleanContenido]
       );
     }
 
@@ -79,7 +87,7 @@ async function sembrarDatosIniciales() {
       );
     }
 
-    console.log('✅ Pasos del Bot, FAQs y Grados restaurados exitosamente en la base de datos MySQL de Contabo');
+    console.log('✅ Pasos del Bot ordenados (1 al 4), FAQs y Grados restaurados exitosamente en MySQL');
   } catch (err) {
     console.warn('⚠️ Nota sembrando datos iniciales:', err.message);
   }
