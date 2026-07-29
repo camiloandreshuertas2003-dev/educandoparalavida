@@ -1,4 +1,4 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestWaWebVersion, makeInMemoryStore } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestWaWebVersion } = require('@whiskeysockets/baileys');
 const qrcodeTerminal = require('qrcode-terminal');
 const QRCode = require('qrcode');
 const path = require('path');
@@ -34,22 +34,6 @@ function obtenerLogsMemoria() {
 }
 
 const authFolder = path.join(__dirname, '../../.baileys_auth');
-const storeFilePath = path.join(__dirname, '../../.baileys_store.json');
-
-// Tienda en memoria oficial de Baileys para resolver LIDs a celulares reales
-const store = makeInMemoryStore({ logger: pino({ level: 'silent' }) });
-
-try {
-  if (fs.existsSync(storeFilePath)) {
-    store.readFromFile(storeFilePath);
-  }
-} catch (e) {}
-
-setInterval(() => {
-  try {
-    store.writeToFile(storeFilePath);
-  } catch (e) {}
-}, 10000);
 
 /**
  * Formatear celular al estándar internacional de Colombia si aplica (+57)
@@ -66,68 +50,33 @@ function formatearJidInternacional(telefono) {
 }
 
 /**
- * Resolver la dirección real de celular (@s.whatsapp.net) consultando el Baileys Store y los metadatos del mensaje
+ * Resolver la dirección JID del usuario preservando el protocolo nativo de WhatsApp
  */
-function resolverJidReal(remoteJid, msg) {
-  if (!remoteJid) return null;
-
-  // 1. Si remoteJid ya es una dirección de celular directa
-  if (remoteJid.includes('@s.whatsapp.net')) {
-    const rawDigits = remoteJid.split('@')[0].split(':')[0].replace(/[^\d]/g, '');
-    const cleanPhone = formatearJidInternacional(rawDigits);
-    contactJidMap.set(cleanPhone, remoteJid);
-    contactJidMap.set(remoteJid, remoteJid);
-    return remoteJid;
-  }
-
-  // 2. Buscar en el catálogo en memoria de Baileys Store
-  if (store && store.contacts) {
-    const contact = store.contacts[remoteJid];
-    if (contact && contact.id && contact.id.includes('@s.whatsapp.net')) {
-      const realJid = contact.id;
-      const rawDigits = realJid.split('@')[0].split(':')[0].replace(/[^\d]/g, '');
-      const cleanPhone = formatearJidInternacional(rawDigits);
-      agregarLogMemoria('info', `🔎 Baileys Store resolvió ${remoteJid} -> ${realJid}`);
-      contactJidMap.set(cleanPhone, realJid);
-      contactJidMap.set(remoteJid, realJid);
-      return realJid;
-    }
-  }
-
-  // 3. Buscar en metadatos del mensaje (remoteJidAlt o participant)
-  const participant = msg?.key?.participant || msg?.participant || '';
-  const remoteJidAlt = msg?.key?.remoteJidAlt || '';
-
-  const candidates = [remoteJidAlt, participant].filter(j => j && typeof j === 'string' && j.includes('@s.whatsapp.net'));
-  if (candidates.length > 0) {
-    const realJid = candidates[0];
-    const rawDigits = realJid.split('@')[0].split(':')[0].replace(/[^\d]/g, '');
-    const cleanPhone = formatearJidInternacional(rawDigits);
-    contactJidMap.set(cleanPhone, realJid);
-    contactJidMap.set(remoteJid, realJid);
-    return realJid;
-  }
-
-  // 4. Fallback si es un LID puro
-  const rawLid = remoteJid.split('@')[0];
-  contactJidMap.set(remoteJid, remoteJid);
-  contactJidMap.set(rawLid, remoteJid);
-  return remoteJid;
-}
-
-/**
- * Normalizar identificador de cliente para el flujo de la maquina de estados
- */
-function normalizarJidCliente(msg) {
+function resolverJidCliente(msg) {
   const remoteJid = msg.key.remoteJid || '';
+  const participant = msg.key.participant || msg.participant || '';
+  const remoteJidAlt = msg.key.remoteJidAlt || '';
 
+  // 1. Ignorar Canales (@newsletter), Grupos y Transmisiones
   if (remoteJid.includes('@newsletter') || remoteJid.includes('@g.us') || remoteJid.includes('status@broadcast')) {
     return null;
   }
 
-  const realJid = resolverJidReal(remoteJid, msg);
-  const rawDigits = realJid ? realJid.split('@')[0].split(':')[0].replace(/[^\d]/g, '') : remoteJid.split('@')[0];
+  // 2. Si se incluye un teléfono de usuario en remoteJidAlt o participant
+  const phoneJid = [remoteJidAlt, participant].find(j => j && typeof j === 'string' && j.includes('@s.whatsapp.net'));
+  if (phoneJid) {
+    const rawDigits = phoneJid.split('@')[0].split(':')[0].replace(/[^\d]/g, '');
+    const cleanPhone = formatearJidInternacional(rawDigits);
+    contactJidMap.set(cleanPhone, remoteJid);
+    contactJidMap.set(remoteJid, remoteJid);
+    return cleanPhone;
+  }
+
+  // 3. Extraer identificador base
+  const rawDigits = remoteJid.split('@')[0].split(':')[0].replace(/[^\d]/g, '');
   const cleanPhone = formatearJidInternacional(rawDigits);
+  contactJidMap.set(cleanPhone, remoteJid);
+  contactJidMap.set(remoteJid, remoteJid);
   return cleanPhone || rawDigits;
 }
 
@@ -144,7 +93,7 @@ async function initWhatsAppWeb() {
     sock = null;
   }
 
-  agregarLogMemoria('info', '⚡ Inicializando motor Baileys WebSocket con Store en disco...');
+  agregarLogMemoria('info', '⚡ Inicializando motor Baileys WebSocket...');
   clientStatus = 'initializing';
 
   try {
@@ -161,9 +110,6 @@ async function initWhatsAppWeb() {
       keepAliveIntervalMs: 25000,
       emitOwnEvents: false,
     });
-
-    // Vincular la tienda de contactos a los eventos de la sesión
-    store.bind(sock.ev);
 
     sock.ev.on('creds.update', saveCreds);
 
@@ -262,15 +208,12 @@ async function initWhatsAppWeb() {
         const textoLimpio = textContent.trim();
         if (!textoLimpio) continue;
 
-        const fromNumber = normalizarJidCliente(msg);
+        const fromNumber = resolverJidCliente(msg);
         if (!fromNumber) continue;
 
-        const realJid = resolverJidReal(remoteJid, msg);
-
-        // Guardar estructura de mensaje entrante para citar respuesta
+        // Guardar estructura de mensaje entrante para citar respuesta (quoted message)
         lastMsgMap.set(fromNumber, msg);
         lastMsgMap.set(remoteJid, msg);
-        if (realJid) lastMsgMap.set(realJid, msg);
 
         if (msgId) {
           processedMsgIds.add(msgId);
@@ -280,7 +223,7 @@ async function initWhatsAppWeb() {
           }
         }
 
-        agregarLogMemoria('recibido', `📩 De ${fromNumber} (JID: ${realJid || remoteJid}): "${textoLimpio}"`);
+        agregarLogMemoria('recibido', `📩 De ${fromNumber} (JID: ${remoteJid}): "${textoLimpio}"`);
 
         const { procesarMensaje } = require('./conversationService');
         try {
@@ -339,9 +282,6 @@ async function logoutWhatsAppWeb() {
     if (fs.existsSync(authFolder)) {
       fs.rmSync(authFolder, { recursive: true, force: true });
     }
-    if (fs.existsSync(storeFilePath)) {
-      fs.rmSync(storeFilePath, { force: true });
-    }
   } catch (e) {}
 
   setTimeout(() => {
@@ -365,7 +305,7 @@ async function enviarMensajeWWeb(telefono, mensaje) {
 
   const cleanPhone = formatearJidInternacional(telefono);
 
-  // 1. Determinar el JID primario priorizando el número telefónico real @s.whatsapp.net o la dirección mapeada en store
+  // 1. Determinar el JID primario sin romper la sintaxis original
   let targetJid = contactJidMap.get(telefono) || contactJidMap.get(cleanPhone);
   if (!targetJid) {
     if (cleanPhone && cleanPhone.length <= 13 && !cleanPhone.includes('@')) {
@@ -378,7 +318,7 @@ async function enviarMensajeWWeb(telefono, mensaje) {
   const quotedMsg = lastMsgMap.get(telefono) || lastMsgMap.get(cleanPhone) || lastMsgMap.get(targetJid);
   const options = quotedMsg ? { quoted: quotedMsg } : {};
 
-  agregarLogMemoria('enviando', `📤 Enviando respuesta a ${cleanPhone} (${targetJid})...`);
+  agregarLogMemoria('enviando', `📤 Enviando respuesta a ${targetJid}...`);
 
   try {
     const result = await sock.sendMessage(targetJid, { text: mensaje }, options);
@@ -388,7 +328,7 @@ async function enviarMensajeWWeb(telefono, mensaje) {
     agregarLogMemoria('exito', `✅ Respuesta entregada con éxito a ${targetJid}`);
     return result;
   } catch (err) {
-    agregarLogMemoria('warn', `⚠️ Fallo envío a ${targetJid}, probando fallback a @s.whatsapp.net...`);
+    agregarLogMemoria('warn', `⚠️ Fallo envío a ${targetJid}, probando fallback directo...`);
     const fallbackJid = `${cleanPhone}@s.whatsapp.net`;
     try {
       const result = await sock.sendMessage(fallbackJid, { text: mensaje }, options);
