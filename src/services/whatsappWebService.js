@@ -1,4 +1,4 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestWaWebVersion, USyncQuery, USyncUser, USyncContactProtocol } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestWaWebVersion } = require('@whiskeysockets/baileys');
 const qrcodeTerminal = require('qrcode-terminal');
 const QRCode = require('qrcode');
 const path = require('path');
@@ -50,68 +50,6 @@ function formatearJidInternacional(telefono) {
 }
 
 /**
- * Resolver dinámicamente direcciones LID a celular real @s.whatsapp.net mediante USync Query oficial de Meta
- */
-async function resolverJidRealConUSync(remoteJid, msg) {
-  if (!remoteJid) return null;
-
-  // 1. Si ya es una dirección de celular directa
-  if (remoteJid.includes('@s.whatsapp.net')) {
-    const rawDigits = remoteJid.split('@')[0].split(':')[0].replace(/[^\d]/g, '');
-    const cleanPhone = formatearJidInternacional(rawDigits);
-    contactJidMap.set(cleanPhone, remoteJid);
-    contactJidMap.set(remoteJid, remoteJid);
-    return remoteJid;
-  }
-
-  // 2. Extraer de metadatos del paquete de Baileys
-  const participant = msg?.key?.participant || msg?.participant || '';
-  const remoteJidAlt = msg?.key?.remoteJidAlt || '';
-
-  const candidates = [remoteJidAlt, participant].filter(j => j && typeof j === 'string' && j.includes('@s.whatsapp.net'));
-  if (candidates.length > 0) {
-    const realJid = candidates[0];
-    const rawDigits = realJid.split('@')[0].split(':')[0].replace(/[^\d]/g, '');
-    const cleanPhone = formatearJidInternacional(rawDigits);
-    contactJidMap.set(cleanPhone, realJid);
-    contactJidMap.set(remoteJid, realJid);
-    return realJid;
-  }
-
-  // 3. Ejecutar USyncQuery nativo de Meta a través de Baileys
-  if (sock && remoteJid.includes('@lid')) {
-    try {
-      const q = new USyncQuery()
-        .withContext('interactive')
-        .withUser(new USyncUser().withId(remoteJid))
-        .withContactProtocol();
-
-      const res = await sock.executeUSyncQuery(q);
-      if (res && res.list && res.list.length > 0) {
-        const found = res.list.find(u => u.id && u.id.includes('@s.whatsapp.net'));
-        if (found) {
-          const realJid = found.id;
-          const rawDigits = realJid.split('@')[0].split(':')[0].replace(/[^\d]/g, '');
-          const cleanPhone = formatearJidInternacional(rawDigits);
-          agregarLogMemoria('info', `🔎 USync Meta resolvió ${remoteJid} -> ${realJid}`);
-          contactJidMap.set(cleanPhone, realJid);
-          contactJidMap.set(remoteJid, realJid);
-          return realJid;
-        }
-      }
-    } catch (e) {
-      console.warn('Nota consultando USync Meta:', e.message);
-    }
-  }
-
-  const rawDigits = remoteJid.split('@')[0].split(':')[0].replace(/[^\d]/g, '');
-  const cleanPhone = formatearJidInternacional(rawDigits);
-  contactJidMap.set(cleanPhone, remoteJid);
-  contactJidMap.set(remoteJid, remoteJid);
-  return remoteJid;
-}
-
-/**
  * Normalizar JID de cliente ignorando canales @newsletter
  */
 function normalizarJidCliente(msg) {
@@ -139,7 +77,7 @@ async function initWhatsAppWeb() {
     sock = null;
   }
 
-  agregarLogMemoria('info', '⚡ Inicializando motor Baileys WebSocket con USync Query...');
+  agregarLogMemoria('info', '⚡ Inicializando motor Baileys WebSocket...');
   clientStatus = 'initializing';
 
   try {
@@ -254,16 +192,12 @@ async function initWhatsAppWeb() {
         const textoLimpio = textContent.trim();
         if (!textoLimpio) continue;
 
-        // Intentar resolver dinámicamente la dirección real de celular usando USync Query
-        const realJid = await resolverJidRealConUSync(remoteJid, msg);
         const fromNumber = normalizarJidCliente(msg);
-
         if (!fromNumber) continue;
 
-        // Guardar estructura de mensaje entrante para citar respuesta (quoted message)
+        // Guardar la referencia exacta del objeto de mensaje para citar la respuesta (quoted context)
         lastMsgMap.set(fromNumber, msg);
         lastMsgMap.set(remoteJid, msg);
-        if (realJid) lastMsgMap.set(realJid, msg);
 
         if (msgId) {
           processedMsgIds.add(msgId);
@@ -273,7 +207,7 @@ async function initWhatsAppWeb() {
           }
         }
 
-        agregarLogMemoria('recibido', `📩 De ${fromNumber} (JID: ${realJid || remoteJid}): "${textoLimpio}"`);
+        agregarLogMemoria('recibido', `📩 De ${fromNumber} (JID: ${remoteJid}): "${textoLimpio}"`);
 
         const { procesarMensaje } = require('./conversationService');
         try {
@@ -341,7 +275,7 @@ async function logoutWhatsAppWeb() {
   return { status: 'disconnected', message: 'Sesión de WhatsApp cerrada exitosamente' };
 }
 
-async function enviarMensajeWWeb(telefono, mensaje) {
+async function enviarMensajeWWeb(sessionId, mensaje) {
   let retries = 0;
   while (!isWhatsAppWebReady() && retries < 10) {
     await new Promise((res) => setTimeout(res, 500));
@@ -349,23 +283,22 @@ async function enviarMensajeWWeb(telefono, mensaje) {
   }
 
   if (!sock) {
-    agregarLogMemoria('error', `❌ No se pudo enviar mensaje a ${telefono}: Socket desconectado`);
+    agregarLogMemoria('error', `❌ No se pudo enviar mensaje a ${sessionId}: Socket desconectado`);
     throw new Error('WhatsApp Web no está listo (el socket está desconectado)');
   }
 
-  const cleanPhone = formatearJidInternacional(telefono);
-
-  // 1. Determinar la dirección de entrega priorizando celular real @s.whatsapp.net
-  let targetJid = contactJidMap.get(telefono) || contactJidMap.get(cleanPhone);
-  if (!targetJid || !targetJid.includes('@s.whatsapp.net')) {
-    if (cleanPhone && cleanPhone.length <= 13 && !cleanPhone.includes('@')) {
-      targetJid = `${cleanPhone}@s.whatsapp.net`;
-    } else {
-      targetJid = telefono;
-    }
+  // 1. Obtener la referencia exacta del objeto de mensaje previo
+  const quotedMsg = lastMsgMap.get(sessionId);
+  
+  // 2. Determinar la dirección de respuesta usando remoteJid intacto del mensaje si existe
+  let targetJid = null;
+  if (quotedMsg && quotedMsg.key && quotedMsg.key.remoteJid) {
+    targetJid = quotedMsg.key.remoteJid;
+  } else {
+    const cleanPhone = formatearJidInternacional(sessionId);
+    targetJid = (cleanPhone && cleanPhone.length <= 13) ? `${cleanPhone}@s.whatsapp.net` : sessionId;
   }
 
-  const quotedMsg = lastMsgMap.get(telefono) || lastMsgMap.get(cleanPhone) || lastMsgMap.get(targetJid);
   const options = quotedMsg ? { quoted: quotedMsg } : {};
 
   agregarLogMemoria('enviando', `📤 Enviando respuesta a ${targetJid}...`);
@@ -375,22 +308,11 @@ async function enviarMensajeWWeb(telefono, mensaje) {
     if (result && result.key && result.key.id) {
       botSentMsgIds.add(result.key.id);
     }
-    agregarLogMemoria('exito', `✅ Respuesta entregada con éxito a ${targetJid}`);
+    agregarLogMemoria('exito', `✅ Respuesta citada y entregada con éxito a ${targetJid}`);
     return result;
   } catch (err) {
-    agregarLogMemoria('warn', `⚠️ Fallo envío a ${targetJid}, probando fallback directo...`);
-    const fallbackJid = `${cleanPhone}@s.whatsapp.net`;
-    try {
-      const result = await sock.sendMessage(fallbackJid, { text: mensaje }, options);
-      if (result && result.key && result.key.id) {
-        botSentMsgIds.add(result.key.id);
-      }
-      agregarLogMemoria('exito', `✅ Mensaje entregado vía fallback a ${cleanPhone}`);
-      return result;
-    } catch (e2) {
-      agregarLogMemoria('error', `❌ Error enviando a ${cleanPhone}: ${e2.message}`);
-      throw e2;
-    }
+    agregarLogMemoria('error', `❌ Error enviando respuesta a ${targetJid}: ${err.message}`);
+    throw err;
   }
 }
 
