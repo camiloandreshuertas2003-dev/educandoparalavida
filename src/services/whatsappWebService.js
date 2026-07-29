@@ -14,7 +14,7 @@ let userProfile = null;
 const processedMsgIds = new Set();
 const botSentMsgIds = new Set();
 const contactJidMap = new Map();
-const lidToPhoneMap = new Map();
+const lastMsgMap = new Map();
 
 // Registro de Logs en Memoria para depuración gráfica en vivo en el navegador
 const logsEnMemoria = [];
@@ -50,7 +50,7 @@ function formatearJidInternacional(telefono) {
 }
 
 /**
- * Normalizar JID de cliente ignorando canales @newsletter y agrupando direcciones @s.whatsapp.net
+ * Normalizar JID de cliente ignorando canales @newsletter y agrupando direcciones @s.whatsapp.net / @lid
  */
 function normalizarJidCliente(msg) {
   const remoteJid = msg.key.remoteJid || '';
@@ -68,8 +68,8 @@ function normalizarJidCliente(msg) {
     if (phoneJid) {
       const rawDigits = phoneJid.split('@')[0].split(':')[0].replace(/[^\d]/g, '');
       const cleanPhone = formatearJidInternacional(rawDigits);
-      contactJidMap.set(cleanPhone, phoneJid);
-      contactJidMap.set(remoteJid, phoneJid);
+      contactJidMap.set(cleanPhone, remoteJid);
+      contactJidMap.set(remoteJid, remoteJid);
       return cleanPhone;
     }
 
@@ -224,6 +224,10 @@ async function initWhatsAppWeb() {
         const fromNumber = normalizarJidCliente(msg);
         if (!fromNumber) continue;
 
+        // Guardar la última estructura de mensaje recibida para citar la respuesta (quoted message)
+        lastMsgMap.set(fromNumber, msg);
+        lastMsgMap.set(remoteJid, msg);
+
         if (msgId) {
           processedMsgIds.add(msgId);
           if (processedMsgIds.size > 2000) {
@@ -314,38 +318,27 @@ async function enviarMensajeWWeb(telefono, mensaje) {
 
   const cleanPhone = formatearJidInternacional(telefono);
 
-  // 1. Buscar JID mapeado prioritario que termine en @s.whatsapp.net para asegurar renderizado visual en la app del cliente
-  let targetJid = contactJidMap.get(cleanPhone) || contactJidMap.get(telefono);
+  // Buscar el JID exacto guardado o el remoteJid original de la conversacion
+  let targetJid = contactJidMap.get(telefono) || contactJidMap.get(cleanPhone) || `${cleanPhone}@s.whatsapp.net`;
 
-  let phoneJid = null;
-  if (cleanPhone && cleanPhone.length <= 13 && !cleanPhone.includes('@')) {
-    phoneJid = `${cleanPhone}@s.whatsapp.net`;
-  }
+  // Buscar el mensaje entrante del cliente para citarlo (quoted message)
+  const quotedMsg = lastMsgMap.get(telefono) || lastMsgMap.get(cleanPhone) || lastMsgMap.get(targetJid);
+  const options = quotedMsg ? { quoted: quotedMsg } : {};
 
-  const primarySendJid = (targetJid && targetJid.includes('@s.whatsapp.net')) ? targetJid : (phoneJid || targetJid || `${cleanPhone}@s.whatsapp.net`);
-
-  agregarLogMemoria('enviando', `📤 Enviando a ${cleanPhone} (${primarySendJid})...`);
+  agregarLogMemoria('enviando', `📤 Enviando respuesta a ${cleanPhone} (${targetJid})...`);
 
   try {
-    const result = await sock.sendMessage(primarySendJid, { text: mensaje });
+    const result = await sock.sendMessage(targetJid, { text: mensaje }, options);
     if (result && result.key && result.key.id) {
       botSentMsgIds.add(result.key.id);
     }
-
-    // 2. Si la direccion original era un @lid, enviar copia al @lid para garantizar sincronizacion multidevice
-    if (targetJid && targetJid.includes('@lid') && targetJid !== primarySendJid) {
-      try {
-        await sock.sendMessage(targetJid, { text: mensaje });
-      } catch (eLid) {}
-    }
-
-    agregarLogMemoria('exito', `✅ Mensaje entregado a ${cleanPhone}`);
+    agregarLogMemoria('exito', `✅ Respuesta citada y entregada con éxito a ${cleanPhone}`);
     return result;
   } catch (err) {
-    agregarLogMemoria('warn', `⚠️ Fallo envío a ${primarySendJid}, probando fallback...`);
-    const fallbackJid = (primarySendJid.includes('@lid') && phoneJid) ? phoneJid : `${cleanPhone}@s.whatsapp.net`;
+    agregarLogMemoria('warn', `⚠️ Fallo envío primario a ${targetJid}, probando fallback directo...`);
+    const fallbackJid = targetJid.includes('@lid') ? `${cleanPhone}@s.whatsapp.net` : targetJid;
     try {
-      const result = await sock.sendMessage(fallbackJid, { text: mensaje });
+      const result = await sock.sendMessage(fallbackJid, { text: mensaje }, options);
       if (result && result.key && result.key.id) {
         botSentMsgIds.add(result.key.id);
       }
