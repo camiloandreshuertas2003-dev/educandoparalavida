@@ -1,4 +1,4 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestWaWebVersion } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestWaWebVersion, USyncQuery, USyncUser, USyncContactProtocol } = require('@whiskeysockets/baileys');
 const qrcodeTerminal = require('qrcode-terminal');
 const QRCode = require('qrcode');
 const path = require('path');
@@ -50,33 +50,79 @@ function formatearJidInternacional(telefono) {
 }
 
 /**
- * Resolver la dirección JID del usuario preservando el protocolo nativo de WhatsApp
+ * Resolver dinámicamente direcciones LID a celular real @s.whatsapp.net mediante USync Query oficial de Meta
  */
-function resolverJidCliente(msg) {
-  const remoteJid = msg.key.remoteJid || '';
-  const participant = msg.key.participant || msg.participant || '';
-  const remoteJidAlt = msg.key.remoteJidAlt || '';
+async function resolverJidRealConUSync(remoteJid, msg) {
+  if (!remoteJid) return null;
 
-  // 1. Ignorar Canales (@newsletter), Grupos y Transmisiones
-  if (remoteJid.includes('@newsletter') || remoteJid.includes('@g.us') || remoteJid.includes('status@broadcast')) {
-    return null;
-  }
-
-  // 2. Si se incluye un teléfono de usuario en remoteJidAlt o participant
-  const phoneJid = [remoteJidAlt, participant].find(j => j && typeof j === 'string' && j.includes('@s.whatsapp.net'));
-  if (phoneJid) {
-    const rawDigits = phoneJid.split('@')[0].split(':')[0].replace(/[^\d]/g, '');
+  // 1. Si ya es una dirección de celular directa
+  if (remoteJid.includes('@s.whatsapp.net')) {
+    const rawDigits = remoteJid.split('@')[0].split(':')[0].replace(/[^\d]/g, '');
     const cleanPhone = formatearJidInternacional(rawDigits);
     contactJidMap.set(cleanPhone, remoteJid);
     contactJidMap.set(remoteJid, remoteJid);
-    return cleanPhone;
+    return remoteJid;
   }
 
-  // 3. Extraer identificador base
+  // 2. Extraer de metadatos del paquete de Baileys
+  const participant = msg?.key?.participant || msg?.participant || '';
+  const remoteJidAlt = msg?.key?.remoteJidAlt || '';
+
+  const candidates = [remoteJidAlt, participant].filter(j => j && typeof j === 'string' && j.includes('@s.whatsapp.net'));
+  if (candidates.length > 0) {
+    const realJid = candidates[0];
+    const rawDigits = realJid.split('@')[0].split(':')[0].replace(/[^\d]/g, '');
+    const cleanPhone = formatearJidInternacional(rawDigits);
+    contactJidMap.set(cleanPhone, realJid);
+    contactJidMap.set(remoteJid, realJid);
+    return realJid;
+  }
+
+  // 3. Ejecutar USyncQuery nativo de Meta a través de Baileys
+  if (sock && remoteJid.includes('@lid')) {
+    try {
+      const q = new USyncQuery()
+        .withContext('interactive')
+        .withUser(new USyncUser().withId(remoteJid))
+        .withContactProtocol();
+
+      const res = await sock.executeUSyncQuery(q);
+      if (res && res.list && res.list.length > 0) {
+        const found = res.list.find(u => u.id && u.id.includes('@s.whatsapp.net'));
+        if (found) {
+          const realJid = found.id;
+          const rawDigits = realJid.split('@')[0].split(':')[0].replace(/[^\d]/g, '');
+          const cleanPhone = formatearJidInternacional(rawDigits);
+          agregarLogMemoria('info', `🔎 USync Meta resolvió ${remoteJid} -> ${realJid}`);
+          contactJidMap.set(cleanPhone, realJid);
+          contactJidMap.set(remoteJid, realJid);
+          return realJid;
+        }
+      }
+    } catch (e) {
+      console.warn('Nota consultando USync Meta:', e.message);
+    }
+  }
+
   const rawDigits = remoteJid.split('@')[0].split(':')[0].replace(/[^\d]/g, '');
   const cleanPhone = formatearJidInternacional(rawDigits);
   contactJidMap.set(cleanPhone, remoteJid);
   contactJidMap.set(remoteJid, remoteJid);
+  return remoteJid;
+}
+
+/**
+ * Normalizar JID de cliente ignorando canales @newsletter
+ */
+function normalizarJidCliente(msg) {
+  const remoteJid = msg.key.remoteJid || '';
+
+  if (remoteJid.includes('@newsletter') || remoteJid.includes('@g.us') || remoteJid.includes('status@broadcast')) {
+    return null;
+  }
+
+  const rawDigits = remoteJid.split('@')[0].split(':')[0].replace(/[^\d]/g, '');
+  const cleanPhone = formatearJidInternacional(rawDigits);
   return cleanPhone || rawDigits;
 }
 
@@ -93,7 +139,7 @@ async function initWhatsAppWeb() {
     sock = null;
   }
 
-  agregarLogMemoria('info', '⚡ Inicializando motor Baileys WebSocket...');
+  agregarLogMemoria('info', '⚡ Inicializando motor Baileys WebSocket con USync Query...');
   clientStatus = 'initializing';
 
   try {
@@ -208,12 +254,16 @@ async function initWhatsAppWeb() {
         const textoLimpio = textContent.trim();
         if (!textoLimpio) continue;
 
-        const fromNumber = resolverJidCliente(msg);
+        // Intentar resolver dinámicamente la dirección real de celular usando USync Query
+        const realJid = await resolverJidRealConUSync(remoteJid, msg);
+        const fromNumber = normalizarJidCliente(msg);
+
         if (!fromNumber) continue;
 
         // Guardar estructura de mensaje entrante para citar respuesta (quoted message)
         lastMsgMap.set(fromNumber, msg);
         lastMsgMap.set(remoteJid, msg);
+        if (realJid) lastMsgMap.set(realJid, msg);
 
         if (msgId) {
           processedMsgIds.add(msgId);
@@ -223,7 +273,7 @@ async function initWhatsAppWeb() {
           }
         }
 
-        agregarLogMemoria('recibido', `📩 De ${fromNumber} (JID: ${remoteJid}): "${textoLimpio}"`);
+        agregarLogMemoria('recibido', `📩 De ${fromNumber} (JID: ${realJid || remoteJid}): "${textoLimpio}"`);
 
         const { procesarMensaje } = require('./conversationService');
         try {
@@ -305,9 +355,9 @@ async function enviarMensajeWWeb(telefono, mensaje) {
 
   const cleanPhone = formatearJidInternacional(telefono);
 
-  // 1. Determinar el JID primario sin romper la sintaxis original
+  // 1. Determinar la dirección de entrega priorizando celular real @s.whatsapp.net
   let targetJid = contactJidMap.get(telefono) || contactJidMap.get(cleanPhone);
-  if (!targetJid) {
+  if (!targetJid || !targetJid.includes('@s.whatsapp.net')) {
     if (cleanPhone && cleanPhone.length <= 13 && !cleanPhone.includes('@')) {
       targetJid = `${cleanPhone}@s.whatsapp.net`;
     } else {
