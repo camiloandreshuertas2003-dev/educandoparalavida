@@ -50,6 +50,34 @@ function formatearJidInternacional(telefono) {
 }
 
 /**
+ * Extraer la dirección telefónica real de celular (@s.whatsapp.net) desde el objeto de mensaje
+ */
+function obtenerJidCelularReal(msg) {
+  if (!msg || !msg.key) return null;
+
+  // 1. Usar senderPn (Sender Phone Number) provisto nativamente por WhatsApp Meta en msg.key
+  if (msg.key.senderPn && typeof msg.key.senderPn === 'string' && msg.key.senderPn.includes('@s.whatsapp.net')) {
+    return msg.key.senderPn;
+  }
+
+  // 2. Usar remoteJidAlt o participant
+  const candidates = [msg.key.remoteJidAlt, msg.key.participant, msg.participant].filter(
+    j => j && typeof j === 'string' && j.includes('@s.whatsapp.net')
+  );
+  if (candidates.length > 0) {
+    return candidates[0];
+  }
+
+  // 3. Si remoteJid ya es una dirección de celular directa
+  const remoteJid = msg.key.remoteJid || '';
+  if (remoteJid.includes('@s.whatsapp.net')) {
+    return remoteJid;
+  }
+
+  return null;
+}
+
+/**
  * Normalizar JID de cliente ignorando canales @newsletter y grupos
  */
 function normalizarJidCliente(msg) {
@@ -59,7 +87,9 @@ function normalizarJidCliente(msg) {
     return null;
   }
 
-  const rawDigits = remoteJid.split('@')[0].split(':')[0].replace(/[^\d]/g, '');
+  const realPhoneJid = obtenerJidCelularReal(msg);
+  const targetForDigits = realPhoneJid || remoteJid;
+  const rawDigits = targetForDigits.split('@')[0].split(':')[0].replace(/[^\d]/g, '');
   const cleanPhone = formatearJidInternacional(rawDigits);
   return cleanPhone || rawDigits;
 }
@@ -77,7 +107,7 @@ async function initWhatsAppWeb() {
     sock = null;
   }
 
-  agregarLogMemoria('info', '⚡ Inicializando motor Baileys WebSocket...');
+  agregarLogMemoria('info', '⚡ Inicializando motor Baileys WebSocket con extractor senderPn...');
   clientStatus = 'initializing';
 
   try {
@@ -192,16 +222,22 @@ async function initWhatsAppWeb() {
         const textoLimpio = textContent.trim();
         if (!textoLimpio) continue;
 
+        // Extraer el teléfono celular real de senderPn (ej: 573027476086@s.whatsapp.net)
+        const realPhoneJid = obtenerJidCelularReal(msg);
         const fromNumber = normalizarJidCliente(msg);
+
         if (!fromNumber) continue;
 
-        // Registrar detalle completo de la estructura del paquete para diagnostico de JID
-        const keyDetails = JSON.stringify(msg.key);
-        agregarLogMemoria('debug_key', `🔑 MSG KEY: ${keyDetails}`);
+        if (realPhoneJid) {
+          contactJidMap.set(fromNumber, realPhoneJid);
+          contactJidMap.set(remoteJid, realPhoneJid);
+          agregarLogMemoria('info', `🎯 Celular real detectado vía senderPn: ${fromNumber} -> ${realPhoneJid}`);
+        }
 
         // Guardar referencia del mensaje entrante
         lastMsgMap.set(fromNumber, msg);
         lastMsgMap.set(remoteJid, msg);
+        if (realPhoneJid) lastMsgMap.set(realPhoneJid, msg);
 
         if (msgId) {
           processedMsgIds.add(msgId);
@@ -211,7 +247,7 @@ async function initWhatsAppWeb() {
           }
         }
 
-        agregarLogMemoria('recibido', `📩 De ${fromNumber} (JID: ${remoteJid}): "${textoLimpio}"`);
+        agregarLogMemoria('recibido', `📩 De ${fromNumber} (JID real: ${realPhoneJid || remoteJid}): "${textoLimpio}"`);
 
         const { procesarMensaje } = require('./conversationService');
         try {
@@ -291,16 +327,23 @@ async function enviarMensajeWWeb(sessionId, mensaje) {
     throw new Error('WhatsApp Web no está listo (el socket está desconectado)');
   }
 
-  // 1. Obtener la referencia exacta del objeto de mensaje previo
+  // 1. Buscar la dirección telefónica real @s.whatsapp.net extraída de senderPn
+  let targetJid = contactJidMap.get(sessionId);
+
   const quotedMsg = lastMsgMap.get(sessionId);
-  
-  // 2. Determinar la dirección de respuesta usando remoteJid intacto del mensaje
-  let targetJid = null;
-  if (quotedMsg && quotedMsg.key && quotedMsg.key.remoteJid) {
-    targetJid = quotedMsg.key.remoteJid;
-  } else {
+  if (!targetJid && quotedMsg) {
+    targetJid = obtenerJidCelularReal(quotedMsg);
+  }
+
+  if (!targetJid) {
     const cleanPhone = formatearJidInternacional(sessionId);
-    targetJid = (cleanPhone && cleanPhone.length <= 13) ? `${cleanPhone}@s.whatsapp.net` : sessionId;
+    if (cleanPhone && cleanPhone.length <= 13 && !cleanPhone.includes('@')) {
+      targetJid = `${cleanPhone}@s.whatsapp.net`;
+    } else if (quotedMsg && quotedMsg.key && quotedMsg.key.remoteJid) {
+      targetJid = quotedMsg.key.remoteJid;
+    } else {
+      targetJid = sessionId;
+    }
   }
 
   const options = quotedMsg ? { quoted: quotedMsg } : {};
@@ -312,7 +355,7 @@ async function enviarMensajeWWeb(sessionId, mensaje) {
     if (result && result.key && result.key.id) {
       botSentMsgIds.add(result.key.id);
     }
-    agregarLogMemoria('exito', `✅ Respuesta citada y entregada con éxito a ${targetJid}`);
+    agregarLogMemoria('exito', `✅ Respuesta entregada con éxito al celular real ${targetJid}`);
     return result;
   } catch (err) {
     agregarLogMemoria('error', `❌ Error enviando respuesta a ${targetJid}: ${err.message}`);
